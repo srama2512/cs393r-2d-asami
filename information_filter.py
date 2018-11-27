@@ -11,21 +11,26 @@ class BackwardInformationFilter(object):
         self.eps = np.zeros((n_state,))        # information vector
         self.P_inv = np.zeros((n_state, n_state)) # inverse belief covariance / information matrix
         self.mu = None
-        self.invertible = False # flag to decide predict step
+        self.seen_obs = False # flag to decide predict step
 
     def update(self, z, HJacobian_at, hx):
         if z is not None:
             self.P_inv = self.P_inv + np.dot(HJacobian_at.T, self.R_inv).dot(HJacobian_at)
-            z_err = z - hx(self.mu) + HJacobian_at.dot(self.mu)
+
+            if self.seen_obs:
+                z_err = z - hx(self.mu) + HJacobian_at.dot(self.mu)
+            else:
+                z_err = z
+                self.seen_obs = True
+
             self.eps = self.eps + np.dot(HJacobian_at.T.dot(self.R_inv), z_err)
-            self.invertible = True
+
 
     def predict(self, u):
         # Note: u must be (delta_x, delta_y and delta_theta) from the forward step
-        if self.invertible:
+        if self.seen_obs:
             self.mu = np.linalg.inv(self.P_inv).dot(self.eps)
             self.G = self.computeG(self.mu, u)
-            # TODO - this does not take into account inverse dynamics
             self.P_inv = np.linalg.inv(self.G.dot(self.P_inv).dot(self.G.T) + self.Q)
             self.mu = self.g(self.mu, u)
             self.eps = self.P_inv.dot(self.mu)
