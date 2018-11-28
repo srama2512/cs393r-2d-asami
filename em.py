@@ -3,6 +3,7 @@ from information_filter import BackwardInformationFilter
 from numpy.linalg import norm as Lnorm
 from collections import namedtuple
 from utils import rotMat, _norm_angle
+from sklearn.linear_model import LinearRegression
 
 import numpy as np
 import math
@@ -39,9 +40,21 @@ class EKFforward(ExtendedKalmanFilter):
 observationTuple = namedtuple('observationTuple', ['height', 'bearing', 'beacon_id', 'command', 'dt'])
 
 class PolynomialRegression(object):
-    # TODO
-    def __init__(self):
-        pass
+    def __init__(self, d=3):
+        self.d = d
+        self.regressor = LinearRegression()
+    
+    def fit(self, X, y)
+        # X is n-dim vector
+        # y is n-dim vector
+        X_ = np.transpose(np.array([X**i for i in range(1, self.d+1)]))
+        y_ = y[:, np.newaxis]
+        self.regressor = self.regressor.fit(X_, y_)
+
+    def predict(self, X):
+        # X is n-dim vector
+        X_ = np.transpose(np.array([X**i for i in range(1, self.d+1)]))
+        return self.regressor = self.regressor.predict(X_)
 
 class ActionMapper(object):
     # TODO
@@ -53,6 +66,7 @@ class EM(object):
         self.n_state = 3
         self.n_action = 3
         self.n_meas = 2
+        self.cmd_size = cmd_size
 
         self.forward_model = EKFforward(dim_x=n_state, dim_z=n_meas)
         self.backward_model = BackwardInformationFilter(n_state=n_state, n_meas=n_meas)
@@ -71,7 +85,7 @@ class EM(object):
         self.alphas = []
         self.betas = []
         self.gammas = []
-        self.delta = [] # b * beta
+        self.deltas = [] # b * beta
         self.forward_model.x = np.array([0., 0., 0.])
         self.forward_model.P = np.diag([1000., 1000., np.pi / 10.]) # belief covariance
         self.forward_model.Q = np.copy(self.action_varn_model)
@@ -133,10 +147,69 @@ class EM(object):
                 obs = None
 
             self.backward_model.update(obs, HJacobian_at, hx)
-            self.delta.append(self.backward_model.get_params())
+            self.deltas.append(self.backward_model.get_params())
             self.backward_model.predict(u=act)
             self.betas.append(self.backward_model.get_params())
 
         # ==== gamma model prediction ====
         for a, b in zip(self.alphas, self.betas):
             self.gammas.append(mul_gaussians(a, b))
+
+    def Mstep(self, data):
+        # data - list of observationTuples
+        # Note: height, bearing are after taking command for dt
+        # ==== Action model update =====
+        mu_cmds = np.zeros((self.cmd_size, self.n_action))
+        n_cmds = np.zeros((self.cmd_size, ))
+        for i, data_t in enumerate(data_t):
+            ht, bear, bid, cmd, dt = data_t
+            mu_alpha_t, sigma_alpha_t = self.alphas[i] # TODO - take care of indexing
+            mu_delta_t, sigma_delta_t = self.deltas[i] # TODO - take care of indexing
+            mu_alpha_delta = np.concatenate((mu_alpha_t, mu_delta_t))
+            sigma_alpha_delta = np.zeros((self.n_state*2, self.n_state*2))
+            sigma_alpha_delta[0:self.n_state, 0:self.n_state] = sigma_alpha_t
+            sigma_alpha_delta[-self.n_state:, -self.n_state:] = sigma_delta_t
+            sigma_cmd = self.action_varn_model
+
+            # D(s_t, s_t_1) = L*st_t_1 + m
+            # L is Jacobian of D at mu_alpha_delta
+            # m = D(mu_alpha_delta) - L*mu_alpha_delta
+            P = np.array([[ -1,  0,  0, 1, 0, 0],
+                          [  0, -1,  0, 0, 1, 0],
+                          [  0,  0, -1, 0, 0, 1]])
+            D = lambda s: rotMat(s[2]).dot(np.dot(P, mu_alpha_delta))
+            L = np.zeros((self.n_action, self.n_state*2))
+            L[:, 0:self.n_state] = -rotMat(mu_alpha_delta[2])
+            L[:, self.n_state:2*self.n_state] = rotMat(mu_alpha_delta[2])
+            tmp = (lambda t: np.array([[-np.sin(t), -np.cos(t)],
+                                       [ np.cos(t), -np.sin(t)]]))(mu_alpha_delta[2])
+            L[0:2, 2] = tmp.dot(np.dot(P, mu_alpha_delta)[0:2])
+            m = D(mu_alpha_delta) - L.dot(mu_alpha_delta)
+
+            Inv = np.linalg.inv(sigma_cmd + L.dot(sigma_alpha_delta).dot(L.T))
+            diff = L.dot(mu_alpha_delta) + m - self.action_model.get(cmd)
+            mu_cmds[cmd, :] = self.action_model.get(cmd) + sigma_cmd.dot(Inv).dot(diff)
+            n_cmds[cmd] = n_cmds[cmd] + 1
+
+        mu_cmds = mu_cmds / n_cmds.reshape((-1,1)) # is division by zero possible?
+        # TODO - update the action_mean_model
+
+        # ==== Sensor model update ==== 
+        obs_pred = []
+        obs_data = []
+        for i, data_t in enumerate(data):
+            ht, bear, bid, cmd, dt = data_t
+            mu_gamma_t, sigma_gamma_t = self.gammas[i]
+            obs_t = hx_beacon(self.bpos[bid])(np.random.multivariate_normal(mu_gamma_t, sigma_gamma_t))
+            obs_pred.append(obs_t)
+            obs_data.append([ht, bear])
+        obs_pred = np.array(obs_pred)
+        obs_data = np.array(obs_data)
+        self.sensor_mean_model.fit(obs_pred[:, 0], obs_data[:, 0]) # update the regression coefs.
+
+        sigma_1 = np.std(self.sensor_mean_model.predict(obs_pred[:, 0]) - obs_data[:, 0])
+        sigma_2 = np.std(obs_pred[:, 1] - obs_data[:, 1])
+        self.sensor_varn_model = np.diag([sigma_1**2, sigma_2**2])
+        
+        
+
