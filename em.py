@@ -20,13 +20,12 @@ HALF_GRASS_Y = GRASS_Y/2.0
 HALF_GRASS_X = GRASS_X/2.0
 
 # TODO - update
-BEACONS = [(-HALF_FIELD_X, -HALF_FIELD_Y),       #WO_BEACON_BLUE_YELLOW
-           (-HALF_FIELD_X, -HALF_FIELD_Y),       #WO_BEACON_YELLOW_BLUE,
-           (-HALF_FIELD_X/2, HALF_FIELD_Y),      #WO_BEACON_BLUE_PINK
-           (-HALF_FIELD_X/2, HALF_FIELD_Y),      #WO_BEACON_PINK_BLUE
-           (0, -HALF_FIELD_Y),                   #WO_BEACON_PINK_YELLOW
-           (0, -HALF_FIELD_Y)]                   #WO_BEACON_YELLOW_PINK,
-
+BEACONS = [(HALF_FIELD_X, HALF_FIELD_Y),       #  WO_BEACON_BLUE_YELLOW
+           (HALF_FIELD_X, -HALF_FIELD_Y),      #  WO_BEACON_YELLOW_BLUE,
+           (0, HALF_FIELD_Y),                  #  WO_BEACON_BLUE_PINK
+           (0, -HALF_FIELD_Y),                 #  WO_BEACON_PINK_BLUE
+           (-HALF_FIELD_X, HALF_FIELD_Y),      #  WO_BEACON_PINK_YELLOW
+           (-HALF_FIELD_X, -HALF_FIELD_Y)]     #  WO_BEACON_YELLOW_PINK,
 
 def _norm_angle(theta):
     return math.atan2(math.sin(theta), math.cos(theta))
@@ -36,7 +35,7 @@ class EKFforward(ExtendedKalmanFilter):
         j13 = -np.sin(self.x[2])*u[0] + np.cos(self.x[2])*u[1]
         j23 = -np.cos(self.x[2])*u[0] - np.sin(self.x[2])*u[1]
 
-        self.F = np.array([[1., 0., j13], 
+        self.F = np.array([[1., 0., j13],
                            [0., 1., j23],
                            [0., 0., 1. ]])
         # print('X before predict: {}'.format(self.x))
@@ -68,7 +67,7 @@ class PolynomialRegression(object):
     def __init__(self, d=3):
         self.d = d
         self.regressor = LinearRegression()
-        self.fit(np.linspace(100,1000, 1000), np.linspace(100,1000, 1000))
+        self.fit(np.linspace(2000,4000, 1000), np.linspace(40,0, 1000))
     
     def fit(self, X, y):
         # X is n-dim vector
@@ -174,6 +173,9 @@ class EM(object):
 
             # print('X initial: {}, obs: {}'.format(self.forward_model.x, obs))
             self.forward_model.predict(u=act)
+            if obs is not None:
+                print('====> Estep: bid: {}, bpos[bid]: {}'.format(bid, self.bpos[bid]))
+                print('====> Estep: sensor params: {}, {}'.format(self.sensor_mean_model.regressor.coef_, self.sensor_mean_model.regressor.intercept_))
             self.forward_model.update(obs, HJacobian_at, hx)
 
             self.alphas.append(self.forward_model.get_params())
@@ -260,7 +262,7 @@ class EM(object):
         sigma_1 = np.std(self.sensor_mean_model.predict(obs_pred[:, 0]) - obs_data[:, 0])
         sigma_2 = np.std(obs_pred[:, 1] - obs_data[:, 1])
         self.sensor_varn_model = np.diag([sigma_1**2, sigma_2**2])
-        
+
 if __name__ == '__main__':
     em = EM()
     parser = argparse.ArgumentParser()
