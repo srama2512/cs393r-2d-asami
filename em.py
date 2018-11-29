@@ -3,6 +3,7 @@ from numpy.linalg import norm as Lnorm
 from collections import namedtuple
 from utils import *
 from sklearn.linear_model import LinearRegression
+from scipy.stats import multivariate_normal
 
 import numpy as np
 import pdb
@@ -19,7 +20,6 @@ HALF_FIELD_X = FIELD_X/2.0
 HALF_GRASS_Y = GRASS_Y/2.0
 HALF_GRASS_X = GRASS_X/2.0
 
-# TODO - update
 BEACONS = [(HALF_FIELD_X, HALF_FIELD_Y),       #  WO_BEACON_BLUE_YELLOW
            (HALF_FIELD_X, -HALF_FIELD_Y),      #  WO_BEACON_YELLOW_BLUE,
            (0, HALF_FIELD_Y),                  #  WO_BEACON_BLUE_PINK
@@ -110,7 +110,7 @@ class EM(object):
 
         self._create_models()
 
-        self.bpos = {k: np.array(v) for k, v in enumerate(BEACONS)} 
+        self.bpos = {k: np.array(v) for k, v in enumerate(BEACONS)}
 
     def _create_models(self):
         self.sensor_mean_model = PolynomialRegression(d=3)
@@ -134,6 +134,7 @@ class EM(object):
 
         self.alphas.append((self.forward_model.x, self.forward_model.P))
         self.betas.append((self.backward_model.x, self.backward_model.P))
+        self.log_likelihood = 0.0
 
     def hx_beacon(self, b):
         # x - current state, b - beacon position
@@ -162,12 +163,24 @@ class EM(object):
             ht, bear, bid, cmd, dt = data_t
             act = self.action_mean_model.get(cmd) * dt
             # print('idx : {}, ht: {}, bear: {}, bid: {}, act: {}'.format(i, ht, bear, bid, act))
+
+
+            # print('X initial: {}, obs: {}'.format(self.forward_model.x, obs))
+            self.forward_model.predict(u=act)
+
             HJacobian_at = None
             hx = None
             if ht is not None:
                 obs = np.array([ht, bear])
                 HJacobian_at = self.HJacobian_at_beacon(self.bpos[bid])
                 hx = self.hx_beacon(self.bpos[bid])
+
+                # log likelihood computation
+                mu_alpha_, sigma_alpha_ = self.forward_model.get_params()
+                H = HJacobian_at(mu_alpha_)
+                mu_obs_t = H.dot(mu_alpha_)
+                sigma_obs_t = H.dot(sigma_alpha_).dot(H.T) + self.sensor_varn_model
+                self.log_likelihood += multivariate_normal.logpdf(obs, mean=mu_obs_t, cov=sigma_obs_t)
             else:
                 obs = None
 
@@ -271,9 +284,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     data = preprocess_data(args.data)
-    # pdb.set_trace()
 
     for it in range(0, args.n_iter):
         em.Estep(data)
-        print('=====> Iteration {:d}'.format(it)) # TODO - find likelihood
+        print('=====> Iteration {:d}, Log Likelihood {:.3f}'.format(it, em.log_likelihood))
         em.Mstep(data)
