@@ -50,9 +50,9 @@ class BackwardInformationFilter(object):
         return G
 
     def reset(self):
-        self.G = np.zeros((n_state, n_state))     # dynamics jacobian
-        self.eps = np.zeros((n_state,))           # information vector
-        self.P_inv = np.zeros((n_state, n_state)) # inverse belief covariance / information matrix
+        self.G = np.zeros((self.n_state, self.n_state))     # dynamics jacobian
+        self.eps = np.zeros((self.n_state,))           # information vector
+        self.P_inv = np.zeros((self.n_state, self.n_state)) # inverse belief covariance / information matrix
         self.mu = None
         self.seen_obs = False                     # was the first observation seen
 
