@@ -20,13 +20,12 @@ HALF_FIELD_X = FIELD_X/2.0
 HALF_GRASS_Y = GRASS_Y/2.0
 HALF_GRASS_X = GRASS_X/2.0
 
-# TODO - update
-BEACONS = [(-HALF_FIELD_X, -HALF_FIELD_Y),       #WO_BEACON_BLUE_YELLOW
-           (-HALF_FIELD_X, -HALF_FIELD_Y),       #WO_BEACON_YELLOW_BLUE,
-           (-HALF_FIELD_X/2, HALF_FIELD_Y),      #WO_BEACON_BLUE_PINK
-           (-HALF_FIELD_X/2, HALF_FIELD_Y),      #WO_BEACON_PINK_BLUE
-           (0, -HALF_FIELD_Y),                   #WO_BEACON_PINK_YELLOW
-           (0, -HALF_FIELD_Y)]                   #WO_BEACON_YELLOW_PINK,
+BEACONS = [(HALF_FIELD_X, HALF_FIELD_Y),       #  WO_BEACON_BLUE_YELLOW
+            (HALF_FIELD_X, -HALF_FIELD_Y),      #  WO_BEACON_YELLOW_BLUE,
+            (0, HALF_FIELD_Y),                  #  WO_BEACON_BLUE_PINK
+            (0, -HALF_FIELD_Y),                  #  WO_BEACON_PINK_BLUE
+            (-HALF_FIELD_X, HALF_FIELD_Y),      #  WO_BEACON_PINK_YELLOW
+            (-HALF_FIELD_X, -HALF_FIELD_Y)]     #  WO_BEACON_YELLOW_PINK
 
 
 def _norm_angle(theta):
