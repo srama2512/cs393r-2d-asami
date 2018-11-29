@@ -1,8 +1,7 @@
 from filterpy.kalman import ExtendedKalmanFilter
-from information_filter import BackwardInformationFilter
 from numpy.linalg import norm as Lnorm
 from collections import namedtuple
-from utils import rotMat, _norm_angle
+from utils import *
 from sklearn.linear_model import LinearRegression
 
 import numpy as np
@@ -20,6 +19,7 @@ HALF_FIELD_X = FIELD_X/2.0
 HALF_GRASS_Y = GRASS_Y/2.0
 HALF_GRASS_X = GRASS_X/2.0
 
+# TODO - update
 BEACONS = [(-HALF_FIELD_X, -HALF_FIELD_Y),       #WO_BEACON_BLUE_YELLOW
            (-HALF_FIELD_X, -HALF_FIELD_Y),       #WO_BEACON_YELLOW_BLUE,
            (-HALF_FIELD_X/2, HALF_FIELD_Y),      #WO_BEACON_BLUE_PINK
@@ -27,6 +27,9 @@ BEACONS = [(-HALF_FIELD_X, -HALF_FIELD_Y),       #WO_BEACON_BLUE_YELLOW
            (0, -HALF_FIELD_Y),                   #WO_BEACON_PINK_YELLOW
            (0, -HALF_FIELD_Y)]                   #WO_BEACON_YELLOW_PINK,
 
+
+def _norm_angle(theta):
+    return math.atan2(math.sin(theta), math.cos(theta))
 
 class EKFforward(ExtendedKalmanFilter):
     def predict_x(self, u=0):
@@ -41,13 +44,31 @@ class EKFforward(ExtendedKalmanFilter):
         # print('X after predict: {}'.format(self.x))
         self.x[2] = _norm_angle(self.x[2])
 
-observationTuple = namedtuple('observationTuple', ['height', 'bearing', 'beacon_id', 'command', 'dt'])
+    def get_params(self):
+        return (np.copy(self.x), np.copy(self.P))
+
+class EKFbackward(ExtendedKalmanFilter):
+    def predict_x(self, u=0):
+        th = self.x[2] - u[2]
+        j13 = -np.sin(th)*u[0] + np.cos(th)*u[1]
+        j23 = -np.cos(th)*u[0] - np.sin(th)*u[1]
+
+        self.F = np.array([[1., 0., j13], 
+                           [0., 1., j23],
+                           [0., 0., 1. ]])
+        # print('X before predict: {}'.format(self.x))
+        self.x = self.x - rotMat(self.x[2]-u[2]).dot(u)
+        # print('X after predict: {}'.format(self.x))
+        self.x[2] = _norm_angle(self.x[2])
+
+    def get_params(self):
+        return (np.copy(self.x), np.copy(self.P))
 
 class PolynomialRegression(object):
     def __init__(self, d=3):
         self.d = d
         self.regressor = LinearRegression()
-        self.fit(np.arange(0,10), np.arange(0,10))
+        self.fit(np.linspace(100,1000, 1000), np.linspace(100,1000, 1000))
     
     def fit(self, X, y):
         # X is n-dim vector
@@ -86,7 +107,7 @@ class EM(object):
         self.cmd_size = 40
 
         self.forward_model = EKFforward(dim_x=self.n_state, dim_z=self.n_meas)
-        self.backward_model = BackwardInformationFilter(n_state=self.n_state, n_meas=self.n_meas)
+        self.backward_model = EKFbackward(dim_x=self.n_state, dim_z=self.n_meas)
 
         self._create_models()
 
@@ -104,15 +125,16 @@ class EM(object):
         self.gammas = []
         self.deltas = [] # b * beta
         self.forward_model.x = np.array([0., 0., 0.])
-        self.forward_model.P = np.diag([1000., 1000., np.pi / 10.]) # belief covariance
+        self.forward_model.P = np.diag([100., 100., np.pi / 10.]) # belief covariance
         self.forward_model.Q = np.copy(self.action_varn_model)
         self.forward_model.R = np.copy(self.sensor_varn_model)
-        self.backward_model.reset()
+        self.backward_model.x = np.array([0., 0., 0.])
+        self.backward_model.P = np.diag([100000., 100000., 100*np.pi]) # belief covariance
         self.backward_model.Q = np.copy(self.action_varn_model)
-        self.backward_model.R_inv = np.linalg.inv(self.sensor_varn_model)
+        self.backward_model.R = np.copy(self.sensor_varn_model)
 
         self.alphas.append((self.forward_model.x, self.forward_model.P))
-        self.betas.append((None, np.diag(np.ones((self.n_state, )) * 100000.0)))
+        self.betas.append((self.backward_model.x, self.backward_model.P))
 
     def hx_beacon(self, b):
         # x - current state, b - beacon position
@@ -154,7 +176,7 @@ class EM(object):
             self.forward_model.predict(u=act)
             self.forward_model.update(obs, HJacobian_at, hx)
 
-            self.alphas.append((self.forward_model.x_post, self.forward_model.P_post))
+            self.alphas.append(self.forward_model.get_params())
 
         # ==== backward model prediction ====
         for data_t in reversed(data):
@@ -176,7 +198,9 @@ class EM(object):
 
         # ==== gamma model prediction ====
         for a, b in zip(self.alphas, self.betas):
-            self.gammas.append(mul_gaussians(a, b))
+            gamma = mul_gaussians(a, b)
+            gamma[0][2] = _norm_angle(gamma[0][2])
+            self.gammas.append(gamma)
 
     def Mstep(self, data):
         # data - list of observationTuples
@@ -184,13 +208,13 @@ class EM(object):
         # ==== Action model update =====
         mu_cmds = np.zeros((self.cmd_size, self.n_action))
         n_cmds = np.zeros((self.cmd_size, ))
-        for i, data_t in enumerate(data_t):
+        for i, data_t in enumerate(data): # Note: t = i+1
             ht, bear, bid, cmd, dt = data_t
-            mu_alpha_t, sigma_alpha_t = self.alphas[i] # TODO - take care of indexing
-            mu_delta_t, sigma_delta_t = self.deltas[i] # TODO - take care of indexing
-            mu_alpha_delta = np.concatenate((mu_alpha_t, mu_delta_t))
+            mu_alpha_t_1, sigma_alpha_t_1 = self.alphas[i]
+            mu_delta_t, sigma_delta_t = self.deltas[i]
+            mu_alpha_delta = np.concatenate((mu_alpha_t_1, mu_delta_t))
             sigma_alpha_delta = np.zeros((self.n_state*2, self.n_state*2))
-            sigma_alpha_delta[0:self.n_state, 0:self.n_state] = sigma_alpha_t
+            sigma_alpha_delta[0:self.n_state, 0:self.n_state] = sigma_alpha_t_1
             sigma_alpha_delta[-self.n_state:, -self.n_state:] = sigma_delta_t
             sigma_cmd = self.action_varn_model
 
@@ -214,7 +238,9 @@ class EM(object):
             mu_cmds[cmd, :] = self.action_mean_model.get(cmd) + sigma_cmd.dot(Inv).dot(diff)
             n_cmds[cmd] = n_cmds[cmd] + 1
 
-        mu_cmds = mu_cmds / n_cmds.reshape((-1,1)) # is division by zero possible?
+        mu_cmds = mu_cmds / (n_cmds.reshape((-1,1)) + 1e-8)
+        mu_cmds[n_cmds == 0] = 0
+
         self.action_mean_model.update(mu_cmds)
 
         # ==== Sensor model update ==== 
@@ -224,7 +250,7 @@ class EM(object):
             ht, bear, bid, cmd, dt = data_t
             mu_gamma_t, sigma_gamma_t = self.gammas[i]
             if ht is not None:
-                obs_t = hx_beacon(self.bpos[bid])(np.random.multivariate_normal(mu_gamma_t, sigma_gamma_t))
+                obs_t = self.hx_beacon(self.bpos[bid])(np.random.multivariate_normal(mu_gamma_t, sigma_gamma_t))
                 obs_pred.append(obs_t)
                 obs_data.append([ht, bear])
         obs_pred = np.array(obs_pred)
@@ -235,32 +261,6 @@ class EM(object):
         sigma_2 = np.std(obs_pred[:, 1] - obs_data[:, 1])
         self.sensor_varn_model = np.diag([sigma_1**2, sigma_2**2])
         
-        
-def preprocess_data(filename):
-    with open(filename, 'r') as f:
-        data = f.read().split('\n')[1:-1]
-        data = [d.split(', ') for d in data]
-        last_obs_idx = len(data)-1
-        for i, d in enumerate(reversed(data)):
-            if d[0] != '-1000':
-                last_obs_idx = i
-                break
-        def sanitize_data_point(d):
-            d[0] = float(d[0]) if d[0] != '-1000' else None
-            d[1] = float(d[1]) if d[1] != '-1000' else None
-            d[2] = int(d[2]) if d[2] != '-1000' else None
-            d[3] = int(d[3])
-            d[4] = float(d[4])
-            return d
-        
-        data = [sanitize_data_point(d) for d in data[:last_obs_idx+1]]
-        data = [observationTuple(height=d[0], 
-                                 bearing=d[1], 
-                                 beacon_id=d[2], 
-                                 command=d[3], 
-                                 dt=d[4]) for d in data]
-        return data
-
 if __name__ == '__main__':
     em = EM()
     parser = argparse.ArgumentParser()
@@ -273,5 +273,5 @@ if __name__ == '__main__':
 
     for it in range(0, args.n_iter):
         em.Estep(data)
-        print('Iteration {:d}\n', it) # TODO - find likelihood
+        print('=====> Iteration {:d}'.format(it)) # TODO - find likelihood
         em.Mstep(data)
