@@ -41,10 +41,11 @@ def preprocess_data(filename):
         d[2] = int(d[2]) if d[2] != '-1000' else None
         d[3] = int(d[3])
         d[4] = float(d[4])
+        d[5] = float(d[5]) if d[5] != '-1000' else None
         return d
 
     data = [sanitize_data_point(d) for d in data[:last_obs_idx+1]]
-    data = [observationTuple(height=d[0], 
+    data = [observationTuple(height=d[5], 
                              bearing=d[1], 
                              beacon_id=d[2], 
                              command=d[3], 
