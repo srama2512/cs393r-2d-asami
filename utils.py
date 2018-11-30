@@ -29,7 +29,7 @@ def mul_gaussians_wrong(g1, g2):
 def preprocess_data(filename):
     with open(filename, 'r') as f:
         data = f.read().split('\n')[1:-1]
-        data = [d.split(', ') for d in data][:1000]
+        data = [d.split(', ') for d in data]
         last_obs_idx = len(data)-1
         for i, d in reversed(list(zip(range(len(data)), data))):
             if d[0] != '-1000':
