@@ -31,15 +31,24 @@ def _norm_angle(theta):
     return math.atan2(math.sin(theta), math.cos(theta))
 
 class EKFforward(ExtendedKalmanFilter):
+    def __init__(self, *args, action_cov=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if action_cov is None:
+            self.action_cov = np.eye(self.dim_u)
+        else:
+            self.action_cov = action_cov
+
     def predict_x(self, u=0):
-        j13 = -np.sin(self.x[2])*u[0] + np.cos(self.x[2])*u[1]
-        j23 = -np.cos(self.x[2])*u[0] - np.sin(self.x[2])*u[1]
+        j13 = -np.sin(self.x[2])*u[0] - np.cos(self.x[2])*u[1]
+        j23 =  np.cos(self.x[2])*u[0] - np.sin(self.x[2])*u[1]
 
         self.F = np.array([[1., 0., j13],
                            [0., 1., j23],
                            [0., 0., 1. ]])
+        R = rotMat(self.x[2])
+        self.Q = R.dot(self.action_cov).dot(R.T)
         # print('X before predict: {}'.format(self.x))
-        self.x = self.x + rotMat(self.x[2]).dot(u)
+        self.x = self.x + R.dot(u)
         # print('X after predict: {}'.format(self.x))
         self.x[2] = _norm_angle(self.x[2])
 
@@ -47,16 +56,25 @@ class EKFforward(ExtendedKalmanFilter):
         return (np.copy(self.x), np.copy(self.P))
 
 class EKFbackward(ExtendedKalmanFilter):
+    def __init__(self, *args, action_cov=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if action_cov is None:
+            self.action_cov = np.eye(self.dim_u)
+        else:
+            self.action_cov = action_cov
+
     def predict_x(self, u=0):
         th = self.x[2] - u[2]
-        j13 = -np.sin(th)*u[0] + np.cos(th)*u[1]
-        j23 = -np.cos(th)*u[0] - np.sin(th)*u[1]
+        j13 = -np.sin(th)*u[0] - np.cos(th)*u[1]
+        j23 =  np.cos(th)*u[0] - np.sin(th)*u[1]
 
         self.F = np.array([[1., 0., j13], 
                            [0., 1., j23],
                            [0., 0., 1. ]])
+        R = rotMat(self.x[2] - u[2])
+        self.Q = R.dot(self.action_cov).dot(R.T)
         # print('X before predict: {}'.format(self.x))
-        self.x = self.x - rotMat(self.x[2]-u[2]).dot(u)
+        self.x = self.x - R.dot(u)
         # print('X after predict: {}'.format(self.x))
         self.x[2] = _norm_angle(self.x[2])
 
@@ -106,10 +124,11 @@ class EM(object):
         self.n_meas = 2
         self.cmd_size = 40
 
-        self.forward_model = EKFforward(dim_x=self.n_state, dim_z=self.n_meas)
-        self.backward_model = EKFbackward(dim_x=self.n_state, dim_z=self.n_meas)
-
         self._create_models()
+        self.forward_model = EKFforward(action_cov=self.action_varn_model.copy(), 
+                                        dim_x=self.n_state, dim_z=self.n_meas)
+        self.backward_model = EKFbackward(action_cov=self.action_varn_model.copy(), 
+                                            dim_x=self.n_state, dim_z=self.n_meas)
 
         self.bpos = {k: np.array(v) for k, v in enumerate(BEACONS)}
 
@@ -236,7 +255,7 @@ class EM(object):
             P = np.array([[ -1,  0,  0, 1, 0, 0],
                           [  0, -1,  0, 0, 1, 0],
                           [  0,  0, -1, 0, 0, 1]])
-            D = lambda s: rotMat(s[2]).dot(np.dot(P, mu_alpha_delta))
+            D = lambda s: rotMat(-s[2]).dot(np.dot(P, s))
             L = np.zeros((self.n_action, self.n_state*2))
             L[:, 0:self.n_state] = -rotMat(mu_alpha_delta[2])
             L[:, self.n_state:2*self.n_state] = rotMat(mu_alpha_delta[2])
@@ -258,21 +277,23 @@ class EM(object):
         self.action_mean_model.update(mu_cmds)
 
         # ==== Sensor model update ==== 
-        obs_pred = []
-        obs_data = []
+        regressX = []
+        regressY = []
         for i, data_t in enumerate(data):
             ht, bear, bid, cmd, dt = data_t
             mu_gamma_t, sigma_gamma_t = self.gammas[i]
             if ht is not None:
-                obs_t = self.hx_beacon(self.bpos[bid])(np.random.multivariate_normal(mu_gamma_t, sigma_gamma_t))
-                obs_pred.append(obs_t)
-                obs_data.append([ht, bear])
-        obs_pred = np.array(obs_pred)
-        obs_data = np.array(obs_data)
-        self.sensor_mean_model.fit(obs_pred[:, 0], obs_data[:, 0]) # update the regression coefs.
+                s_t = np.random.multivariate_normal(mu_gamma_t, sigma_gamma_t)
+                dist_t = Lnorm(s_t[:2] - self.bpos[bid][:2])
+                ang_t = self.hx_beacon(self.bpos[bid])(s_t)[1]
+                regressX.append([dist_t, ang_t])
+                regressY.append([ht, bear])
+        regressX = np.array(regressX)
+        regressY = np.array(regressY)
+        self.sensor_mean_model.fit(regressX[:, 0], regressY[:, 0]) # update the regression coefs.
 
-        sigma_1 = np.std(self.sensor_mean_model.predict(obs_pred[:, 0]) - obs_data[:, 0])
-        sigma_2 = np.std(obs_pred[:, 1] - obs_data[:, 1])
+        sigma_1 = np.std(self.sensor_mean_model.predict(regressX[:, 0]) - regressY[:, 0])
+        sigma_2 = np.std(obs_pred[:, 1] - regressY[:, 1])
         self.sensor_varn_model = np.diag([sigma_1**2, sigma_2**2])
 
 if __name__ == '__main__':
