@@ -129,7 +129,7 @@ class EM(object):
         self.bpos = {k: np.array(v) for k, v in enumerate(BEACONS)}
 
     def _create_models(self):
-        self.sensor_mean_model = PolynomialRegression(d=4)
+        self.sensor_mean_model = PolynomialRegression(d=3)
         self.action_mean_model = ActionMapper(cmd_size=self.cmd_size, n_action=self.n_action)
         self.sensor_varn_model = np.diag([100., 0.04])
         # self.action_varn_model = np.diag([100., 100., 0.01])
@@ -219,7 +219,7 @@ class EM(object):
             self.alphas.append(self.forward_model.get_params())
 
         # ==== backward model prediction ====
-        for data_t in reversed(data):
+        for i, data_t in enumerate(list(reversed(data))):
             print('=====> Backward {}/{}'.format(i+1, len(data)))
             ht, bear, bid, cmd, dt = data_t
             act = self.action_mean_model.get(cmd) * dt
