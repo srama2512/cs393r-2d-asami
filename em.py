@@ -81,7 +81,7 @@ class PolynomialRegression(object):
     def __init__(self, d=3):
         self.d = d
         self.regressor = LinearRegression()
-        self.fit(np.linspace(2000,4000, 1000), np.linspace(40,0, 1000))
+        self.fit(np.linspace(2000, 4000, 1000), np.linspace(40, 0, 1000))
         #self.fit(np.linspace(2.000,4.000, 1000), np.linspace(40,0, 1000))
 
     def fit(self, X, y):
@@ -304,12 +304,15 @@ class EM(object):
         self.prior_varn_model  = np.copy(self.gammas[0][1])
 
 if __name__ == '__main__':
-    em = EM()
     parser = argparse.ArgumentParser()
     parser.add_argument('--data', type=str, default='2d_asami_data.txt')
     parser.add_argument('--n_iter', type=int, default=10)
+    parser.add_argument('--seed', type=int, default=123)
     args = parser.parse_args()
 
+    np.random.seed(args.seed)
+
+    em = EM()
     data = preprocess_data(args.data)
 
     for it in range(0, args.n_iter):
