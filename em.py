@@ -213,6 +213,7 @@ class EM(object):
             if obs is not None:
                 print('====> Estep: bid: {}, bpos[bid]: {}'.format(bid, self.bpos[bid]))
                 print('====> Estep: sensor params: {}, {}'.format(self.sensor_mean_model.regressor.coef_, self.sensor_mean_model.regressor.intercept_))
+                print('====> Estep: sensor variances: {}'.format(self.sensor_varn_model))
             self.forward_model.update(obs, HJacobian_at, hx)
             # self.forward_model.x = self.forward_model.x.clip([-FIELD_X*2, -FIELD_Y*2, -4], [FIELD_X*2, FIELD_Y*2, 4])
 
