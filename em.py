@@ -10,8 +10,8 @@ import pdb
 import math
 import argparse
 
-FIELD_Y = 3600#3.600
-FIELD_X = 5400#5.400
+FIELD_Y = 3.600#3600
+FIELD_X = 5.400#5400
 
 HALF_FIELD_Y = FIELD_Y/2.0
 HALF_FIELD_X = FIELD_X/2.0
@@ -81,8 +81,8 @@ class PolynomialRegression(object):
     def __init__(self, d=3):
         self.d = d
         self.regressor = LinearRegression()
-        self.fit(np.linspace(2000, 4000, 1000), np.linspace(40, 0, 1000))
-        #self.fit(np.linspace(2.000,4.000, 1000), np.linspace(40,0, 1000))
+        # self.fit(np.linspace(2000,4000, 1000), np.linspace(40,0, 1000))
+        self.fit(np.linspace(2.000,4.000, 1000), np.linspace(40,0, 1000))
 
     def fit(self, X, y):
         # X is n-dim vector
@@ -131,10 +131,14 @@ class EM(object):
     def _create_models(self):
         self.sensor_mean_model = PolynomialRegression(d=4)
         self.action_mean_model = ActionMapper(cmd_size=self.cmd_size, n_action=self.n_action)
-        self.sensor_varn_model = np.diag([100., 0.04])
-        self.action_varn_model = np.diag([100., 100., 0.01])
+        # self.sensor_varn_model = np.diag([100., 0.04])
+        # self.action_varn_model = np.diag([100., 100., 0.01])
+        # self.prior_mean_model  = np.zeros((self.n_state,))
+        # self.prior_varn_model  = np.diag([10000., 10000., np.pi / 10.])
+        self.sensor_varn_model = np.diag([1e-4, 0.04])
+        self.action_varn_model = np.diag([1e-4, 1e-4, 0.01])
         self.prior_mean_model  = np.zeros((self.n_state,))
-        self.prior_varn_model  = np.diag([10000., 10000., np.pi / 10.])
+        self.prior_varn_model  = np.diag([0.01, 0.01, np.pi / 10.])
 
     def _initialize_em(self):
         self.alphas = []
@@ -142,12 +146,13 @@ class EM(object):
         self.gammas = []
         self.deltas = [] # b * beta
         self.forward_model.x = np.array([0., 0., 0.])
-        self.forward_model.P = np.diag([10000., 10000., np.pi / 10.]) # belief covariance
-        #self.forward_model.P = np.diag([.100, .100, np.pi / 10.]) # belief covariance
+        # self.forward_model.P = np.diag([10000., 10000., np.pi / 10.]) # belief covariance
+        self.forward_model.P = np.diag([0.01, 0.01, np.pi / 10.]) # belief covariance
         self.forward_model.Q = np.copy(self.action_varn_model)
         self.forward_model.R = np.copy(self.sensor_varn_model)
         self.backward_model.x = np.array([0., 0., 0.])
-        self.backward_model.P = np.diag([10000000., 10000000., 100*np.pi]) # belief covariance
+        # self.backward_model.P = np.diag([10000000., 10000000., 100*np.pi]) # belief covariance
+        self.backward_model.P = np.diag([10, 10., 100*np.pi]) # belief covariance
         self.backward_model.Q = np.copy(self.action_varn_model)
         self.backward_model.R = np.copy(self.sensor_varn_model)
 
@@ -185,7 +190,7 @@ class EM(object):
             # print('idx : {}, ht: {}, bear: {}, bid: {}, act: {}'.format(i, ht, bear, bid, act))
             # print('X initial: {}, obs: {}'.format(self.forward_model.x, obs))
             self.forward_model.predict(u=act)
-            self.forward_model.x = self.forward_model.x.clip([-FIELD_X*2, -FIELD_Y*2, -4], [FIELD_X*2, FIELD_Y*2, 4])
+            # self.forward_model.x = self.forward_model.x.clip([-FIELD_X*2, -FIELD_Y*2, -4], [FIELD_X*2, FIELD_Y*2, 4])
 
             HJacobian_at = None
             hx = None
@@ -207,7 +212,7 @@ class EM(object):
                 print('====> Estep: bid: {}, bpos[bid]: {}'.format(bid, self.bpos[bid]))
                 print('====> Estep: sensor params: {}, {}'.format(self.sensor_mean_model.regressor.coef_, self.sensor_mean_model.regressor.intercept_))
             self.forward_model.update(obs, HJacobian_at, hx)
-            self.forward_model.x = self.forward_model.x.clip([-FIELD_X*2, -FIELD_Y*2, -4], [FIELD_X*2, FIELD_Y*2, 4])
+            # self.forward_model.x = self.forward_model.x.clip([-FIELD_X*2, -FIELD_Y*2, -4], [FIELD_X*2, FIELD_Y*2, 4])
 
             self.alphas.append(self.forward_model.get_params())
 
@@ -226,10 +231,10 @@ class EM(object):
                 obs = None
 
             self.backward_model.update(obs, HJacobian_at, hx)
-            self.backward_model.x = self.backward_model.x.clip([-FIELD_X*2, -FIELD_Y*2, -4], [FIELD_X*2, FIELD_Y*2, 4])
+            # self.backward_model.x = self.backward_model.x.clip([-FIELD_X*2, -FIELD_Y*2, -4], [FIELD_X*2, FIELD_Y*2, 4])
             self.deltas.append(self.backward_model.get_params())
             self.backward_model.predict(u=act)
-            self.backward_model.x = self.backward_model.x.clip([-FIELD_X*2, -FIELD_Y*2, -4], [FIELD_X*2, FIELD_Y*2, 4])
+            # self.backward_model.x = self.backward_model.x.clip([-FIELD_X*2, -FIELD_Y*2, -4], [FIELD_X*2, FIELD_Y*2, 4])
             self.betas.append(self.backward_model.get_params())
 
         # ==== gamma model prediction ====
