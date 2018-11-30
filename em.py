@@ -131,11 +131,10 @@ class EM(object):
     def _create_models(self):
         self.sensor_mean_model = PolynomialRegression(d=4)
         self.action_mean_model = ActionMapper(cmd_size=self.cmd_size, n_action=self.n_action)
-        # self.sensor_varn_model = np.diag([100., 0.04])
+        self.sensor_varn_model = np.diag([100., 0.04])
         # self.action_varn_model = np.diag([100., 100., 0.01])
         # self.prior_mean_model  = np.zeros((self.n_state,))
         # self.prior_varn_model  = np.diag([10000., 10000., np.pi / 10.])
-        self.sensor_varn_model = np.diag([1e-4, 0.04])
         self.action_varn_model = np.diag([1e-4, 1e-4, 0.01])
         self.prior_mean_model  = np.zeros((self.n_state,))
         self.prior_varn_model  = np.diag([0.01, 0.01, np.pi / 10.])
@@ -174,8 +173,11 @@ class EM(object):
         def HJacobian_at(x):
             dx = x[:2] - b[:2]
             dist = Lnorm(dx)
-            return np.array([[dx[0]/dist    , dx[1]/dist   , 0 ],
-                             [-dx[1]/dist**2, dx[0]/dist**2, -1]])
+            sensor_params = self.sensor_mean_model.regressor.coef_[0].copy()
+            dim = self.sensor_mean_model.d
+            dhx = (sensor_params * np.arange(1, dim+1)).dot(np.array([dist**i for i in range(0, dim)]))
+            return np.array([[dhx*dx[0]/dist, dhx*dx[1]/dist,  0],
+                             [-dx[1]/dist**2,  dx[0]/dist**2, -1]])
         return HJacobian_at
 
     def Estep(self, data):
@@ -291,7 +293,7 @@ class EM(object):
         regressY = []
         for i, data_t in enumerate(data):
             ht, bear, bid, cmd, dt = data_t
-            mu_gamma_t, sigma_gamma_t = self.gammas[i]
+            mu_gamma_t, sigma_gamma_t = self.gammas[i+1]
             if ht is not None:
                 s_t = np.random.multivariate_normal(mu_gamma_t, sigma_gamma_t)
                 dist_t = Lnorm(s_t[:2] - self.bpos[bid][:2])
