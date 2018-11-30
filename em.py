@@ -77,6 +77,7 @@ class PolynomialRegression(object):
             X_[:, i-1] = np.array(X)**i
         y_ = np.array(y)[:, np.newaxis]
         self.regressor = self.regressor.fit(X_, y_)
+        self.regressor.coef_[0, 1:] = 0
 
     def predict(self, X):
         # X is n-dim vector
@@ -94,8 +95,8 @@ class ActionMapper(object):
     def get(self, cmd):
         return self.cmd_mus[cmd]
 
-    def update(self, delta_mus):
-        self.cmd_mus = self.cmd_mus + delta_mus
+    def update(self, new_mus):
+        self.cmd_mus = np.copy(new_mus)
         return
 
 class EM(object):
@@ -163,8 +164,6 @@ class EM(object):
             ht, bear, bid, cmd, dt = data_t
             act = self.action_mean_model.get(cmd) * dt
             # print('idx : {}, ht: {}, bear: {}, bid: {}, act: {}'.format(i, ht, bear, bid, act))
-
-
             # print('X initial: {}, obs: {}'.format(self.forward_model.x, obs))
             self.forward_model.predict(u=act)
 
@@ -184,8 +183,6 @@ class EM(object):
             else:
                 obs = None
 
-            # print('X initial: {}, obs: {}'.format(self.forward_model.x, obs))
-            self.forward_model.predict(u=act)
             if obs is not None:
                 print('====> Estep: bid: {}, bpos[bid]: {}'.format(bid, self.bpos[bid]))
                 print('====> Estep: sensor params: {}, {}'.format(self.sensor_mean_model.regressor.coef_, self.sensor_mean_model.regressor.intercept_))
@@ -248,6 +245,8 @@ class EM(object):
             L[0:2, 2] = tmp.dot(np.dot(P, mu_alpha_delta)[0:2])
             m = D(mu_alpha_delta) - L.dot(mu_alpha_delta)
 
+            print('====> Mstep progress: {}/{}'.format(i, len(data)))
+            print('====> Mstep:\nmu_alpha_delta: {}\nsigma_alpha_delta: {}\nL: {}'.format(mu_alpha_delta, sigma_alpha_delta, L))
             Inv = np.linalg.inv(sigma_cmd + L.dot(sigma_alpha_delta).dot(L.T))
             diff = L.dot(mu_alpha_delta) + m - self.action_mean_model.get(cmd)
             mu_cmds[cmd, :] = self.action_mean_model.get(cmd) + sigma_cmd.dot(Inv).dot(diff)
