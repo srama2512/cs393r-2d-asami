@@ -10,8 +10,8 @@ import pdb
 import math
 import argparse
 
-FIELD_Y = 3.600#3600
-FIELD_X = 5.400#5400
+FIELD_Y = 3600#3600
+FIELD_X = 5400#5400
 
 HALF_FIELD_Y = FIELD_Y/2.0
 HALF_FIELD_X = FIELD_X/2.0
@@ -64,9 +64,9 @@ class EKFbackward(ExtendedKalmanFilter):
         j13 = -np.sin(th)*u[0] - np.cos(th)*u[1]
         j23 =  np.cos(th)*u[0] - np.sin(th)*u[1]
 
-        self.F = np.array([[1., 0., j13],
-                           [0., 1., j23],
-                           [0., 0., 1. ]])
+        self.F = np.array([[1., 0., -j13],
+                           [0., 1., -j23],
+                           [0., 0.,  1. ]])
         R = rotMat(self.x[2] - u[2])
         self.Q = R.dot(self.action_cov).dot(R.T)
         # print('X before predict: {}'.format(self.x))
@@ -81,8 +81,8 @@ class PolynomialRegression(object):
     def __init__(self, d=3):
         self.d = d
         self.regressor = LinearRegression()
-        # self.fit(np.linspace(2000,4000, 1000), np.linspace(40,0, 1000))
-        self.fit(np.linspace(2.000,4.000, 1000), np.linspace(40,0, 1000))
+        self.fit(np.linspace(2000,4000, 1000), np.linspace(40,0, 1000))
+        # self.fit(np.linspace(2.000,4.000, 1000), np.linspace(40,0, 1000))
 
     def fit(self, X, y):
         # X is n-dim vector
@@ -132,12 +132,12 @@ class EM(object):
         self.sensor_mean_model = PolynomialRegression(d=3)
         self.action_mean_model = ActionMapper(cmd_size=self.cmd_size, n_action=self.n_action)
         self.sensor_varn_model = np.diag([100., 0.04])
-        # self.action_varn_model = np.diag([100., 100., 0.01])
-        # self.prior_mean_model  = np.zeros((self.n_state,))
-        # self.prior_varn_model  = np.diag([10000., 10000., np.pi / 10.])
-        self.action_varn_model = np.diag([1e-4, 1e-4, 0.01])
+        self.action_varn_model = np.diag([100., 100., 0.01])
         self.prior_mean_model  = np.zeros((self.n_state,))
-        self.prior_varn_model  = np.diag([0.01, 0.01, np.pi / 10.])
+        self.prior_varn_model  = np.diag([10000., 10000., np.pi / 10.])
+        # self.action_varn_model = np.diag([1e-4, 1e-4, 0.01])
+        # self.prior_mean_model  = np.zeros((self.n_state,))
+        # self.prior_varn_model  = np.diag([0.01, 0.01, np.pi / 10.])
 
     def _initialize_em(self):
         self.alphas = []
@@ -145,13 +145,13 @@ class EM(object):
         self.gammas = []
         self.deltas = [] # b * beta
         self.forward_model.x = np.array([0., 0., 0.])
-        # self.forward_model.P = np.diag([10000., 10000., np.pi / 10.]) # belief covariance
-        self.forward_model.P = np.diag([0.01, 0.01, np.pi / 10.]) # belief covariance
+        self.forward_model.P = np.diag([10000., 10000., np.pi / 10.]) # belief covariance
+        # self.forward_model.P = np.diag([0.01, 0.01, np.pi / 10.]) # belief covariance
         self.forward_model.Q = np.copy(self.action_varn_model)
         self.forward_model.R = np.copy(self.sensor_varn_model)
         self.backward_model.x = np.array([0., 0., 0.])
-        # self.backward_model.P = np.diag([10000000., 10000000., 100*np.pi]) # belief covariance
-        self.backward_model.P = np.diag([10, 10., 100*np.pi]) # belief covariance
+        self.backward_model.P = np.diag([10000000., 10000000., 100*np.pi]) # belief covariance
+        # self.backward_model.P = np.diag([10, 10., 100*np.pi]) # belief covariance
         self.backward_model.Q = np.copy(self.action_varn_model)
         self.backward_model.R = np.copy(self.sensor_varn_model)
 
