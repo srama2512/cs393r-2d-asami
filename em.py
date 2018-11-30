@@ -105,6 +105,22 @@ class ActionMapper(object):
         self.cmd_size = 40
         self.n_action = n_action
         self.cmd_mus = np.zeros((cmd_size, n_action))
+        self.b_angles = [0, math.pi, math.pi/4, -math.pi/4, math.pi/2, -math.pi/2, 3*math.pi/4, -3*math.pi/4]
+        self.a_vels = [-1./2., -1./6., 0., 1./6., 1./2.]
+        self.gt_mus = np.zeros((cmd_size, n_action))
+        count = 0
+        for a in self.a_vels:
+            for b in self.b_angles:
+                magn = math.sqrt(1-a**2)
+                vx = magn*math.cos(b)
+                vy = magn*math.sin(b)
+                self.gt_mus[count] = np.array(list(self.getGTVelocities(vx, vy, a)))
+                count += 1
+
+        self.cmd_mus = self.gt_mus.copy()
+
+    def getGTVelocities(self, x, y, theta):
+        return x*240.0, y*120.0, theta*math.radians(130.0)
 
     def get(self, cmd):
         return self.cmd_mus[cmd]
@@ -150,8 +166,8 @@ class EM(object):
         self.forward_model.Q = np.copy(self.action_varn_model)
         self.forward_model.R = np.copy(self.sensor_varn_model)
         self.backward_model.x = np.array([0., 0., 0.])
-        self.backward_model.P = np.diag([10000000., 10000000., 100*np.pi]) # belief covariance
-        # self.backward_model.P = np.diag([10, 10., 100*np.pi]) # belief covariance
+        self.backward_model.P = np.diag([10000000., 10000000., 2*np.pi*np.pi]) # belief covariance
+        # self.backward_model.P = np.diag([10, 10., 2*np.pi*np.pi]) # belief covariance
         self.backward_model.Q = np.copy(self.action_varn_model)
         self.backward_model.R = np.copy(self.sensor_varn_model)
 
