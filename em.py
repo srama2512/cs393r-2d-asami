@@ -105,6 +105,22 @@ class ActionMapper(object):
         self.cmd_size = 40
         self.n_action = n_action
         self.cmd_mus = np.zeros((cmd_size, n_action))
+        self.b_angles = [0, math.pi, math.pi/4, -math.pi/4, math.pi/2, -math.pi/2, 3*math.pi/4, -3*math.pi/4]
+        self.a_vels = [-1./2., -1./6., 0., 1./6., 1./2.]
+        self.gt_mus = np.zeros((cmd_size, n_action))
+        count = 0
+        for a in self.a_vels:
+            for b in self.b_angles:
+                magn = math.sqrt(1-a**2)
+                vx = magn*math.cos(b)
+                vy = magn*math.sin(b)
+                self.gt_mus[count] = np.array(list(self.getGTVelocities(vx, vy, a)))
+                count += 1
+
+        self.cmd_mus = self.gt_mus.copy()
+
+    def getGTVelocities(self, x, y, theta):
+        return x*240.0, y*120.0, theta*math.radians(130.0)
 
     def get(self, cmd):
         return self.cmd_mus[cmd]
@@ -150,8 +166,8 @@ class EM(object):
         self.forward_model.Q = np.copy(self.action_varn_model)
         self.forward_model.R = np.copy(self.sensor_varn_model)
         self.backward_model.x = np.array([0., 0., 0.])
-        self.backward_model.P = np.diag([10000000., 10000000., 100*np.pi]) # belief covariance
-        # self.backward_model.P = np.diag([10, 10., 100*np.pi]) # belief covariance
+        self.backward_model.P = np.diag([10000000., 10000000., 2*np.pi*np.pi]) # belief covariance
+        # self.backward_model.P = np.diag([10, 10., 2*np.pi*np.pi]) # belief covariance
         self.backward_model.Q = np.copy(self.action_varn_model)
         self.backward_model.R = np.copy(self.sensor_varn_model)
 
@@ -163,7 +179,8 @@ class EM(object):
         # x - current state, b - beacon position
         def hx(x):
             dist = Lnorm(x[:2] - b[:2])
-            bear = _norm_angle(math.atan2(b[1]-x[1], b[0]-x[0]) - x[2])
+            rel_pos_beacon = (rotMat(x[2])[:2, :2]).dot(b[:2] - x[:2])
+            bear = math.atan2(rel_pos_beacon[1], rel_pos_beacon[0])
             ot = np.array([self.sensor_mean_model.predict([dist])[0], bear])
             return ot
         return hx
@@ -176,8 +193,14 @@ class EM(object):
             sensor_params = self.sensor_mean_model.regressor.coef_[0].copy()
             dim = self.sensor_mean_model.d
             dhx = (sensor_params * np.arange(1, dim+1)).dot(np.array([dist**i for i in range(0, dim)]))
+            rel_pos_beacon = (rotMat(x[2])[:2, :2]).dot(b[:2] - x[:2])
+            rpx, rpy = rel_pos_beacon
+            yx2y2 = rpy/(rpx**2 + rpy**2)
+            xx2y2 = rpx/(rpx**2 + rpy**2)
+            j21 = np.dot([yx2y2, xx2y2], [ np.cos(x[2]), -np.sin(x[2])])
+            j22 = np.dot([yx2y2, xx2y2], [-np.sin(x[2]), -np.cos(x[2])])
             return np.array([[dhx*dx[0]/dist, dhx*dx[1]/dist,  0],
-                             [-dx[1]/dist**2,  dx[0]/dist**2, -1]])
+                             [           j21,            j22,  1]])
         return HJacobian_at
 
     def Estep(self, data):
