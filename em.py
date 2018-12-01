@@ -29,8 +29,14 @@ BEACONS = [(HALF_FIELD_X, HALF_FIELD_Y),       #  WO_BEACON_BLUE_YELLOW
            (-HALF_FIELD_X, HALF_FIELD_Y),      #  WO_BEACON_PINK_YELLOW
            (-HALF_FIELD_X, -HALF_FIELD_Y)]     #  WO_BEACON_YELLOW_PINK,
 
+
 def _norm_angle(theta):
     return math.atan2(math.sin(theta), math.cos(theta))
+
+def residual_fn(z, z2):
+    dz = z - z2
+    dz[1] = math.atan2(math.sin(dz[1]), math.cos(dz[1]))
+    return dz
 
 class EKFforward(ExtendedKalmanFilter):
     def __init__(self, *args, action_cov=None, **kwargs):
@@ -227,7 +233,7 @@ class EM(object):
             else:
                 obs = None
 
-            self.forward_model.update(obs, HJacobian_at, hx)
+            self.forward_model.update(obs, HJacobian_at, hx, residual=residual_fn)
 
             if ht is not None:
                 # log likelihood computation
@@ -257,7 +263,7 @@ class EM(object):
             else:
                 obs = None
 
-            self.backward_model.update(obs, HJacobian_at, hx)
+            self.backward_model.update(obs, HJacobian_at, hx, residual=residual_fn)
             self.deltas.append(self.backward_model.get_params())
             self.backward_model.predict(u=act)
             backward_params = self.backward_model.get_params()
@@ -274,7 +280,7 @@ class EM(object):
 
         # ==== gamma model prediction ====
         for a, b in zip(self.alphas, self.betas):
-            gamma = mul_gaussians(a, b)
+            gamma = deepcopy(a)#mul_gaussians(a, b)
             gamma[0][2] = _norm_angle(gamma[0][2])
             self.gammas.append(gamma)
 
