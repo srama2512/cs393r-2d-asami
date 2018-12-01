@@ -15,6 +15,9 @@ import argparse
 FIELD_Y = 3600#3600
 FIELD_X = 5400#5400
 
+gt_data = open('state_log.txt', 'r').read().split('\n')[1:-1]
+gt_data = np.array([[float(k) for k in d.split(', ')] for d in gt_data])
+
 HALF_FIELD_Y = FIELD_Y/2.0
 HALF_FIELD_X = FIELD_X/2.0
 
@@ -150,12 +153,12 @@ class EM(object):
         self.bpos = {k: np.array(v) for k, v in enumerate(BEACONS)}
 
     def _create_models(self):
-        self.sensor_mean_model = PolynomialRegression(d=1)
+        self.sensor_mean_model = PolynomialRegression(d=3)
         self.action_mean_model = ActionMapper(cmd_size=self.cmd_size, n_action=self.n_action)
-        self.sensor_varn_model = np.diag([1., 0.0004])
-        #self.sensor_varn_model = np.diag([100., 0.04])
-        self.action_varn_model = np.diag([1., 1., 0.0001])
-        #self.action_varn_model = np.diag([100., 100., 0.01])
+        #self.sensor_varn_model = np.diag([1., 0.0004])
+        self.sensor_varn_model = np.diag([100., 0.04])
+        #self.action_varn_model = np.diag([1., 1., 0.0001])
+        self.action_varn_model = np.diag([100., 100., 0.01])
         self.prior_mean_model  = np.zeros((self.n_state,))
         self.prior_varn_model  = np.diag([10000., 10000., np.pi / 10.])
         # self.action_varn_model = np.diag([1e-4, 1e-4, 0.01])
@@ -192,7 +195,7 @@ class EM(object):
             return ot
         return hx
 
-    def HJacobian_at_beacon(self, b):
+    def HJacobian_at_beacon(self, b): # df(x)/dx
         # x - current state, b - beacon position
         def HJacobian_at(x):
             dx = x[:2] - b[:2]
@@ -224,11 +227,16 @@ class EM(object):
             ht, bear, bid, cmd, dt = data_t
             act = self.action_mean_model.get(cmd) * dt
             # print('idx : {}, ht: {}, bear: {}, bid: {}, act: {}'.format(i, ht, bear, bid, act))
-            # print('X initial: {}, obs: {}'.format(self.forward_model.x, obs))
+            #if i > 0:
+            #    print('X initial: {}, obs: {}, GT X initial: {}'.format(self.forward_model.x, obs, gt_data[i-1, :]))
             #print('Command: {}'.format(cmd))
-            #print('Action model: {}'.format(self.action_mean_model.get(cmd)))
+            #print('Action command: {}'.format(act))
+            #print('Action: {}'.format(self.action_mean_model.get(cmd)))
             self.forward_model.predict(u=act)
+            #print('X theta: {}, GT X theta: {}'.format(self.forward_model.x[2], gt_data[i, 2]))
+            #print('X final: {}, GT X final: {}'.format(self.forward_model.x,gt_data[i, :]))
             # self.forward_model.x = self.forward_model.x.clip([-FIELD_X*2, -FIELD_Y*2, -4], [FIELD_X*2, FIELD_Y*2, 4])
+            #pdb.set_trace()
 
             HJacobian_at = None
             hx = None
@@ -333,7 +341,7 @@ class EM(object):
         mu_cmds = mu_cmds / (n_cmds.reshape((-1,1)) + 1e-8)
         mu_cmds[n_cmds == 0] = 0
 
-        #self.action_mean_model.update(mu_cmds)
+        self.action_mean_model.update(mu_cmds)
 
         # ==== Sensor model update ==== 
         regressX = []
@@ -371,6 +379,7 @@ if __name__ == '__main__':
     for it in range(0, args.n_iter):
         print('=====> Iteration {:d}'.format(it))
         em.Estep(data)
+        #print('Action command 10: {}'.format(em.action_mean_model.cmd_mus[10, :]))
         print('=====> Log Likelihood {:.3f}'.format(em.log_likelihood))
         #plt.subplot(2, 1, 1)
         #plt.plot(em.forward_distance_estimates, em.forward_observations)
@@ -380,18 +389,30 @@ if __name__ == '__main__':
         #plt.title('Backward pass estimates')
         #plt.show()
 
-        #fig = plt.figure()
-        #ax = fig.add_subplot(111, projection='3d')
-        #x = [alpha[0][0] for alpha in em.alphas]
-        #y = [alpha[0][1] for alpha in em.alphas]
-        #t = list(range(len(em.alphas)))
-        #ax.plot(x, y, t, label='parametric curve')
-        #plt.show()
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+        x = [alpha[0][0] for alpha in em.alphas]
+        y = [alpha[0][1] for alpha in em.alphas]
+        t = list(range(len(em.alphas)))
+        ax.plot(x, y, t, label='alphas')
+        x = gt_data[:, 0]
+        y = gt_data[:, 1]
+        t = range(gt_data.shape[0])
+        ax.plot(x, y, t, label='gt curve', linestyle='dashed')
+        x = [beta[0][0] for beta in em.betas]
+        y = [beta[0][1] for beta in em.betas]
+        t = list(range(len(em.betas)))
+        ax.plot(x, y, t, label='betas')
+        plt.legend()
+        plt.show()
 
         fig = plt.figure()
         theta = [alpha[0][2] for alpha in em.alphas]
         t = list(range(len(em.alphas)))
         plt.plot(t, theta)
+        plt.plot(range(gt_data.shape[0]), gt_data[:, 2], linestyle='dashed')
         plt.show()
 
         em.Mstep(data)
+        #print('Action command 10: {}'.format(em.action_mean_model.cmd_mus[10, :]))
+        #pdb.set_trace()
