@@ -3,7 +3,7 @@ import numpy as np
 import math
 from numpy.linalg import inv as linv
 
-observationTuple = namedtuple('observationTuple', ['height', 'bearing', 'beacon_id', 'command', 'dt'])
+observationTuple = namedtuple('observationTuple', ['height', 'bearing', 'beacon_id', 'command', 'dt', 'dist'])
 
 def rotMat(theta):
     return np.array([[np.cos(theta), -np.sin(theta),         0.],
@@ -45,11 +45,12 @@ def preprocess_data(filename):
         return d
 
     data = [sanitize_data_point(d) for d in data[:last_obs_idx+1]]
-    data = [observationTuple(height=d[5], 
+    data = [observationTuple(height=d[0], 
                              bearing=d[1], 
                              beacon_id=d[2], 
                              command=d[3], 
-                             dt=d[4]) for d in data]
+                             dt=d[4],
+                             dist=d[5]) for d in data]
     return data
 
 def print_params(u):

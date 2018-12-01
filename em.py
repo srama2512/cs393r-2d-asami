@@ -5,6 +5,7 @@ from utils import *
 from sklearn.linear_model import LinearRegression
 from scipy.stats import multivariate_normal
 from mpl_toolkits.mplot3d import Axes3D
+from copy import deepcopy
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -72,9 +73,7 @@ class EKFbackward(ExtendedKalmanFilter):
                            [0., 0.,  1. ]])
         R = rotMat(self.x[2] - u[2])
         self.Q = R.dot(self.action_cov).dot(R.T)
-        # print('X before predict: {}'.format(self.x))
         self.x = self.x - R.dot(u)
-        # print('X after predict: {}'.format(self.x))
         self.x[2] = _norm_angle(self.x[2])
 
     def get_params(self):
@@ -85,12 +84,11 @@ class PolynomialRegression(object):
         self.d = d
         self.regressor = LinearRegression()
         d = np.linspace(1500, 4000, 1000)
-        #ht = 10*np.exp(2.-d/2000.)
+        ht = 10*np.exp(2.-d/2000.)
         #ht = 5*np.exp(2.-d/2000.)
-        ht = np.linspace(1500, 4000, 1000)
+        #ht = np.linspace(1500, 4000, 1000)
 
         self.fit(d, ht)
-        # self.fit(np.linspace(2.000,4.000, 1000), np.linspace(40,0, 1000))
 
     def fit(self, X, y):
         # X is n-dim vector
@@ -155,29 +153,22 @@ class EM(object):
     def _create_models(self):
         self.sensor_mean_model = PolynomialRegression(d=3)
         self.action_mean_model = ActionMapper(cmd_size=self.cmd_size, n_action=self.n_action)
-        #self.sensor_varn_model = np.diag([1., 0.0004])
         self.sensor_varn_model = np.diag([100., 0.04])
-        #self.action_varn_model = np.diag([1., 1., 0.0001])
-        self.action_varn_model = np.diag([100., 100., 0.01])
+        self.action_varn_model = np.diag([4000., 4000., 0.25])
         self.prior_mean_model  = np.zeros((self.n_state,))
         self.prior_varn_model  = np.diag([10000., 10000., np.pi / 10.])
-        # self.action_varn_model = np.diag([1e-4, 1e-4, 0.01])
-        # self.prior_mean_model  = np.zeros((self.n_state,))
-        # self.prior_varn_model  = np.diag([0.01, 0.01, np.pi / 10.])
 
     def _initialize_em(self):
         self.alphas = []
         self.betas = []
         self.gammas = []
         self.deltas = [] # b * beta
-        self.forward_model.x = np.array([0., 0., 0.])
-        self.forward_model.P = np.diag([10000., 10000., np.pi / 10.]) # belief covariance
-        # self.forward_model.P = np.diag([0.01, 0.01, np.pi / 10.]) # belief covariance
+        self.forward_model.x = np.copy(self.prior_mean_model)
+        self.forward_model.P = np.copy(self.prior_varn_model) # belief covariance
         self.forward_model.Q = np.copy(self.action_varn_model)
         self.forward_model.R = np.copy(self.sensor_varn_model)
         self.backward_model.x = np.array([0., 0., 0.])
-        self.backward_model.P = np.diag([10000000., 10000000., 2*np.pi*np.pi]) # belief covariance
-        # self.backward_model.P = np.diag([10, 10., 2*np.pi*np.pi]) # belief covariance
+        self.backward_model.P = np.diag([100000., 100000., 2*np.pi]) # belief covariance
         self.backward_model.Q = np.copy(self.action_varn_model)
         self.backward_model.R = np.copy(self.sensor_varn_model)
 
@@ -223,20 +214,9 @@ class EM(object):
         self.backward_observations = []
         # ==== forward model prediction ====
         for i, data_t in enumerate(data):
-            #print('=====> Forward {}/{}'.format(i+1, len(data)))
-            ht, bear, bid, cmd, dt = data_t
+            ht, bear, bid, cmd, dt, _ = data_t
             act = self.action_mean_model.get(cmd) * dt
-            # print('idx : {}, ht: {}, bear: {}, bid: {}, act: {}'.format(i, ht, bear, bid, act))
-            #if i > 0:
-            #    print('X initial: {}, obs: {}, GT X initial: {}'.format(self.forward_model.x, obs, gt_data[i-1, :]))
-            #print('Command: {}'.format(cmd))
-            #print('Action command: {}'.format(act))
-            #print('Action: {}'.format(self.action_mean_model.get(cmd)))
             self.forward_model.predict(u=act)
-            #print('X theta: {}, GT X theta: {}'.format(self.forward_model.x[2], gt_data[i, 2]))
-            #print('X final: {}, GT X final: {}'.format(self.forward_model.x,gt_data[i, :]))
-            # self.forward_model.x = self.forward_model.x.clip([-FIELD_X*2, -FIELD_Y*2, -4], [FIELD_X*2, FIELD_Y*2, 4])
-            #pdb.set_trace()
 
             HJacobian_at = None
             hx = None
@@ -244,22 +224,18 @@ class EM(object):
                 obs = np.array([ht, bear])
                 HJacobian_at = self.HJacobian_at_beacon(self.bpos[bid])
                 hx = self.hx_beacon(self.bpos[bid])
-
-                # log likelihood computation
-                mu_alpha_, sigma_alpha_ = self.forward_model.get_params()
-                H = HJacobian_at(mu_alpha_)
-                mu_obs_t = H.dot(mu_alpha_)
-                sigma_obs_t = H.dot(sigma_alpha_).dot(H.T) + self.sensor_varn_model
-                self.log_likelihood += multivariate_normal.logpdf(obs, mean=mu_obs_t, cov=sigma_obs_t)
             else:
                 obs = None
 
-            #if obs is not None:
-                #print('====> Estep: bid: {}, bpos[bid]: {}'.format(bid, self.bpos[bid]))
-                #print('====> Estep: sensor params: {}, {}'.format(self.sensor_mean_model.regressor.coef_, self.sensor_mean_model.regressor.intercept_))
-                #print('====> Estep: sensor variances: {}'.format(self.sensor_varn_model))
             self.forward_model.update(obs, HJacobian_at, hx)
-            # self.forward_model.x = self.forward_model.x.clip([-FIELD_X*2, -FIELD_Y*2, -4], [FIELD_X*2, FIELD_Y*2, 4])
+
+            if ht is not None:
+                # log likelihood computation
+                mu_alpha, sigma_alpha = self.forward_model.get_params()
+                H = HJacobian_at(mu_alpha)
+                mu_obs_t = H.dot(mu_alpha) + hx(mu_alpha) - H.dot(mu_alpha)
+                sigma_obs_t = H.dot(sigma_alpha).dot(H.T) + self.sensor_varn_model
+                self.log_likelihood += multivariate_normal.logpdf(obs, mean=mu_obs_t, cov=sigma_obs_t)
 
             forward_params = self.forward_model.get_params()
             self.alphas.append(forward_params)
@@ -270,8 +246,7 @@ class EM(object):
 
         # ==== backward model prediction ====
         for i, data_t in enumerate(list(reversed(data))):
-            #print('=====> Backward {}/{}'.format(i+1, len(data)))
-            ht, bear, bid, cmd, dt = data_t
+            ht, bear, bid, cmd, dt, _ = data_t
             act = self.action_mean_model.get(cmd) * dt
             HJacobian_at = None
             hx = None
@@ -283,16 +258,19 @@ class EM(object):
                 obs = None
 
             self.backward_model.update(obs, HJacobian_at, hx)
-            # self.backward_model.x = self.backward_model.x.clip([-FIELD_X*2, -FIELD_Y*2, -4], [FIELD_X*2, FIELD_Y*2, 4])
             self.deltas.append(self.backward_model.get_params())
             self.backward_model.predict(u=act)
-            # self.backward_model.x = self.backward_model.x.clip([-FIELD_X*2, -FIELD_Y*2, -4], [FIELD_X*2, FIELD_Y*2, 4])
             backward_params = self.backward_model.get_params()
             self.betas.append(backward_params)
             if obs is not None:
                 d_to_beacon = Lnorm(backward_params[0][:2] - self.bpos[bid][:2])
                 self.backward_distance_estimates.append(d_to_beacon)
                 self.backward_observations.append(d_to_beacon)
+
+        self.deltas = list(reversed(self.deltas))
+        self.betas  = list(reversed(self.betas))
+        self.backward_distance_estimates = list(reversed(self.backward_distance_estimates))
+        self.backward_observations = list(reversed(self.backward_observations))
 
         # ==== gamma model prediction ====
         for a, b in zip(self.alphas, self.betas):
@@ -307,7 +285,7 @@ class EM(object):
         mu_cmds = np.zeros((self.cmd_size, self.n_action))
         n_cmds = np.zeros((self.cmd_size, ))
         for i, data_t in enumerate(data): # Note: t = i+1
-            ht, bear, bid, cmd, dt = data_t
+            ht, bear, bid, cmd, dt, _ = data_t
             mu_alpha_t_1, sigma_alpha_t_1 = self.alphas[i]
             mu_delta_t, sigma_delta_t = self.deltas[i]
             mu_alpha_delta = np.concatenate((mu_alpha_t_1, mu_delta_t))
@@ -331,8 +309,6 @@ class EM(object):
             L[0:2, 2] = tmp.dot(np.dot(P, mu_alpha_delta)[0:2])
             m = D(mu_alpha_delta) - L.dot(mu_alpha_delta)
 
-            #print('====> Mstep progress: {}/{}'.format(i, len(data)))
-            #print('====> Mstep:\nmu_alpha_delta: {}\nsigma_alpha_delta: {}\nL: {}'.format(mu_alpha_delta, sigma_alpha_delta, L))
             Inv = np.linalg.inv(sigma_cmd + L.dot(sigma_alpha_delta).dot(L.T))
             diff = L.dot(mu_alpha_delta) + m - self.action_mean_model.get(cmd)
             mu_cmds[cmd, :] = self.action_mean_model.get(cmd) + sigma_cmd.dot(Inv).dot(diff)
@@ -347,7 +323,7 @@ class EM(object):
         regressX = []
         regressY = []
         for i, data_t in enumerate(data):
-            ht, bear, bid, cmd, dt = data_t
+            ht, bear, bid, cmd, dt, _ = data_t
             mu_gamma_t, sigma_gamma_t = self.gammas[i+1]
             if ht is not None:
                 s_t = np.random.multivariate_normal(mu_gamma_t, sigma_gamma_t)
@@ -379,7 +355,6 @@ if __name__ == '__main__':
     for it in range(0, args.n_iter):
         print('=====> Iteration {:d}'.format(it))
         em.Estep(data)
-        #print('Action command 10: {}'.format(em.action_mean_model.cmd_mus[10, :]))
         print('=====> Log Likelihood {:.3f}'.format(em.log_likelihood))
         #plt.subplot(2, 1, 1)
         #plt.plot(em.forward_distance_estimates, em.forward_observations)
@@ -389,30 +364,56 @@ if __name__ == '__main__':
         #plt.title('Backward pass estimates')
         #plt.show()
 
-        fig = plt.figure()
-        ax = fig.add_subplot(111, projection='3d')
-        x = [alpha[0][0] for alpha in em.alphas]
-        y = [alpha[0][1] for alpha in em.alphas]
-        t = list(range(len(em.alphas)))
-        ax.plot(x, y, t, label='alphas')
-        x = gt_data[:, 0]
-        y = gt_data[:, 1]
-        t = range(gt_data.shape[0])
-        ax.plot(x, y, t, label='gt curve', linestyle='dashed')
-        x = [beta[0][0] for beta in em.betas]
-        y = [beta[0][1] for beta in em.betas]
-        t = list(range(len(em.betas)))
-        ax.plot(x, y, t, label='betas')
-        plt.legend()
-        plt.show()
+        if (it+1) % 15 == 0:
+            fig = plt.figure(0)
+            ax = fig.add_subplot(121, projection='3d')
+            x = [alpha[0][0] for alpha in em.alphas]
+            y = [alpha[0][1] for alpha in em.alphas]
+            t = list(range(len(em.alphas)))
+            ax.plot(x, y, t, label='alphas')
+            x = gt_data[:, 0]
+            y = gt_data[:, 1]
+            t = range(gt_data.shape[0])
+            ax.plot(x, y, t, label='gt curve', linestyle='dashed')
+            ax = fig.add_subplot(122, projection='3d')
+            x = [beta[0][0] for beta in em.betas]
+            y = [beta[0][1] for beta in em.betas]
+            t = list(range(len(em.betas)))
+            ax.plot(x, y, t, label='betas')
+            x = gt_data[:, 0]
+            y = gt_data[:, 1]
+            t = range(gt_data.shape[0])
+            ax.plot(x, y, t, label='gt curve', linestyle='dashed')
+            plt.legend()
 
-        fig = plt.figure()
-        theta = [alpha[0][2] for alpha in em.alphas]
-        t = list(range(len(em.alphas)))
-        plt.plot(t, theta)
-        plt.plot(range(gt_data.shape[0]), gt_data[:, 2], linestyle='dashed')
-        plt.show()
+            fig = plt.figure(1)
+            plt.subplot(2, 1, 1)
+            theta = [alpha[0][2] for alpha in em.alphas]
+            t = list(range(len(em.alphas)))
+            plt.plot(t, theta, label='alphas')
+            plt.plot(range(gt_data.shape[0]), gt_data[:, 2], linestyle='dashed')
+            plt.title('Alphas theta value')
+            plt.legend()
+            plt.subplot(2, 1, 2)
+            theta = [beta[0][2] for beta in em.betas]
+            t = list(range(len(em.betas)))
+            plt.plot(t, theta, label='betas')
+            plt.title('Betas theta value')
+            plt.plot(range(gt_data.shape[0]), gt_data[:, 2], linestyle='dashed')
+            plt.legend()
+
+            fig = plt.figure(2)
+            distances = np.linspace(1000, 4000, 1000)
+            plt.plot(distances, em.sensor_mean_model.predict(distances))
+            gt_data_pairs = filter(lambda x: x[0] is not None, [[d.height, d.dist] for d in data])
+            gt_data_pairs = np.array(list(gt_data_pairs))
+            gt_regress = PolynomialRegression(d=3)
+            gt_regress.fit(gt_data_pairs[:, 1], gt_data_pairs[:, 0])
+            gt_fit = gt_regress.predict(distances)
+            plt.plot(distances, gt_fit, linestyle='dashed')
+            plt.xlabel('Distances')
+            plt.ylabel('Observations')
+            plt.title('Learned sensor model plot')
+            plt.show()
 
         em.Mstep(data)
-        #print('Action command 10: {}'.format(em.action_mean_model.cmd_mus[10, :]))
-        #pdb.set_trace()
