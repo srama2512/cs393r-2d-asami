@@ -3,9 +3,10 @@ from numpy.linalg import norm as Lnorm
 from collections import namedtuple
 from utils import *
 from sklearn.linear_model import LinearRegression
-from scipy.stats import multivariate_normal
+from scipy.stats import multivariate_normal, circvar
 from mpl_toolkits.mplot3d import Axes3D
 from copy import deepcopy
+from process_gt import compute_action_model, process_gt_data
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -51,15 +52,16 @@ class EKFforward(ExtendedKalmanFilter):
             self.action_cov = action_cov
 
     def predict_x(self, u=0):
-        j13 = -np.sin(self.x[2])*u[0] + np.cos(self.x[2])*u[1]
-        j23 = -np.cos(self.x[2])*u[0] - np.sin(self.x[2])*u[1]
+        j13 = -np.sin(self.x[2])*u[0] - np.cos(self.x[2])*u[1]
+        j23 =  np.cos(self.x[2])*u[0] - np.sin(self.x[2])*u[1]
 
         self.F = np.array([[1., 0., j13],
                            [0., 1., j23],
                            [0., 0., 1. ]])
-        R = rotMat(-self.x[2])
+        R = rotMat(self.x[2])
         self.Q = R.dot(self.action_cov).dot(R.T)
         self.x = self.x + R.dot(u)
+        # print('##### predict {}, x : {}'.format(R.dot(u), self.x))
         self.x[2] = _norm_angle(self.x[2])
 
     def get_params(self):
@@ -75,13 +77,13 @@ class EKFbackward(ExtendedKalmanFilter):
 
     def predict_x(self, u=0):
         th = self.x[2] - u[2]
-        j13 =  np.sin(th)*u[0] - np.cos(th)*u[1]
-        j23 =  np.cos(th)*u[0] + np.sin(th)*u[1]
+        j13 =  np.sin(th)*u[0] + np.cos(th)*u[1]
+        j23 = -np.cos(th)*u[0] + np.sin(th)*u[1]
 
         self.F = np.array([[1., 0., j13],
                            [0., 1., j23],
                            [0., 0.,  1.]])
-        R = rotMat(-th)
+        R = rotMat(th)
         self.Q = R.dot(self.action_cov).dot(R.T)
         self.x = self.x - R.dot(u)
         self.x[2] = _norm_angle(self.x[2])
@@ -133,7 +135,12 @@ class ActionMapper(object):
                 self.gt_mus[count] = np.array(list(self.getGTVelocities(vx, vy, a)))
                 count += 1
 
-        self.cmd_mus = self.gt_mus.copy()
+        # self.cmd_mus = self.gt_mus.copy()
+        sensor_data = preprocess_data('2d_asami_data.txt')
+        gt_data = process_gt_data('state_log.txt')
+        cmds = [d.command for d in sensor_data]
+        gt_action_model = compute_action_model(gt_data, cmds)
+        self.cmd_mus = gt_action_model['mean']
 
     def getGTVelocities(self, x, y, theta):
         return x*240.0, y*120.0, theta*math.radians(130.0)
@@ -163,10 +170,10 @@ class EM(object):
     def _create_models(self):
         self.sensor_mean_model = PolynomialRegression(d=3)
         self.action_mean_model = ActionMapper(cmd_size=self.cmd_size, n_action=self.n_action)
-        self.sensor_varn_model = np.diag([100., 0.04])
-        self.action_varn_model = np.diag([4000., 4000., 0.25])
+        self.sensor_varn_model = np.diag([100., 0.2])
+        self.action_varn_model = np.diag([400., 400., 0.1])
         self.prior_mean_model  = np.zeros((self.n_state,))
-        self.prior_varn_model  = np.diag([10000., 10000., np.pi / 10.])
+        self.prior_varn_model  = np.diag([10000., 10000., 1])
 
     def _initialize_em(self):
         self.alphas = []
@@ -330,6 +337,9 @@ class EM(object):
         mu_cmds[n_cmds == 0] = 0
 
         mu_cmds = np.concatenate([mu_cmds[:, :2], np.arctan2(mu_cmds[:, 3], mu_cmds[:, 2])[:, np.newaxis]], axis=1)
+        with np.printoptions(formatter={'float': '{: 10.3f}'.format}):
+            print('mu_cmds update : \n{}'.format(np.column_stack([self.action_mean_model.cmd_mus, mu_cmds])))
+        mu_cmds += self.action_mean_model.cmd_mus
 
         self.action_mean_model.update(mu_cmds)
 
@@ -350,9 +360,13 @@ class EM(object):
         self.sensor_mean_model.fit(regressX[:, 0], regressY[:, 0]) # update the regression coefs.
         sigma_1_sqr = np.mean((self.sensor_mean_model.predict(regressX[:, 0]) - regressY[:, 0])**2)
         sigma_2_sqr = np.mean(_norm_angle_vec(regressX[:, 1] - regressY[:, 1])**2)
+        sigma_2_sqr_ = circvar(regressX[:, 1] - regressY[:, 1], high=math.pi, low=-math.pi)
+        # print('ours: {}, scipy: {}'.format(sigma_2_sqr, sigma_2_sqr_))
         self.sensor_varn_model = np.diag([sigma_1_sqr, sigma_2_sqr])
         self.prior_mean_model  = np.copy(self.gammas[0][0])
         self.prior_varn_model  = np.copy(self.gammas[0][1])
+        print('sigma_1 : {:.3f}, sigma_2 : {:.3f}'.format(self.sensor_varn_model[0, 0], self.sensor_varn_model[1, 1]))
+        # pdb.set_trace()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -378,45 +392,77 @@ if __name__ == '__main__':
         #plt.title('Backward pass estimates')
         #plt.show()
 
-        if (it+1) % 15 == 0:
-            fig = plt.figure(0)
-            ax = fig.add_subplot(121, projection='3d')
-            x = [alpha[0][0] for alpha in em.alphas]
-            y = [alpha[0][1] for alpha in em.alphas]
-            t = list(range(len(em.alphas)))
-            ax.plot(x, y, t, label='alphas')
-            x = gt_data[:, 0]
-            y = gt_data[:, 1]
-            t = range(gt_data.shape[0])
-            ax.plot(x, y, t, label='gt curve', linestyle='dashed')
-            ax = fig.add_subplot(122, projection='3d')
-            x = [beta[0][0] for beta in em.betas]
-            y = [beta[0][1] for beta in em.betas]
-            t = list(range(len(em.betas)))
-            ax.plot(x, y, t, label='betas')
-            x = gt_data[:, 0]
-            y = gt_data[:, 1]
-            t = range(gt_data.shape[0])
-            ax.plot(x, y, t, label='gt curve', linestyle='dashed')
-            plt.legend()
+        if (it+1) % 10 == 1:
+            # fig = plt.figure(0)
+            # ax = fig.add_subplot(121, projection='3d')
+            # x = [alpha[0][0] for alpha in em.alphas]
+            # y = [alpha[0][1] for alpha in em.alphas]
+            # t = list(range(len(em.alphas)))
+            # ax.plot(x, y, t, label='alphas')
+            # x = gt_data[:, 0]
+            # y = gt_data[:, 1]
+            # t = range(gt_data.shape[0])
+            # ax.plot(x, y, t, label='gt curve', linestyle='dashed')
+            # ax = fig.add_subplot(122, projection='3d')
+            # x = [beta[0][0] for beta in em.betas]
+            # y = [beta[0][1] for beta in em.betas]
+            # t = list(range(len(em.betas)))
+            # ax.plot(x, y, t, label='betas')
+            # x = gt_data[:, 0]
+            # y = gt_data[:, 1]
+            # t = range(gt_data.shape[0])
+            # ax.plot(x, y, t, label='gt curve', linestyle='dashed')
+            # plt.legend()
 
             fig = plt.figure(1)
             plt.subplot(2, 1, 1)
             theta = [alpha[0][2] for alpha in em.alphas]
             t = list(range(len(em.alphas)))
-            plt.plot(t, theta, label='alphas')
-            plt.plot(range(gt_data.shape[0]), gt_data[:, 2], linestyle='dashed')
+            plt.plot(t[:5000], theta[:5000], label='alphas')
+            plt.plot(range(gt_data.shape[0])[:5000], gt_data[:, 2][:5000], linestyle='dashed')
             plt.title('Alphas theta value')
             plt.legend()
             plt.subplot(2, 1, 2)
             theta = [beta[0][2] for beta in em.betas]
             t = list(range(len(em.betas)))
-            plt.plot(t, theta, label='betas')
+            plt.plot(t[:5000], theta[:5000], label='betas')
             plt.title('Betas theta value')
-            plt.plot(range(gt_data.shape[0]), gt_data[:, 2], linestyle='dashed')
+            plt.plot(range(gt_data.shape[0])[:5000], gt_data[:, 2][:5000], linestyle='dashed')
             plt.legend()
 
             fig = plt.figure(2)
+            plt.subplot(2, 1, 1)
+            x = [alpha[0][0] for alpha in em.alphas]
+            t = list(range(len(em.alphas)))
+            plt.plot(t[:5000], x[:5000], label='alphas')
+            plt.plot(range(gt_data.shape[0])[:5000], gt_data[:, 0][:5000], linestyle='dashed')
+            plt.title('Alphas x value')
+            plt.legend()
+            plt.subplot(2, 1, 2)
+            x = [beta[0][0] for beta in em.betas]
+            t = list(range(len(em.betas)))
+            plt.plot(t[:5000], x[:5000], label='betas')
+            plt.title('Betas x value')
+            plt.plot(range(gt_data.shape[0])[:5000], gt_data[:, 0][:5000], linestyle='dashed')
+            plt.legend()
+
+            fig = plt.figure(3)
+            plt.subplot(2, 1, 1)
+            y = [alpha[0][1] for alpha in em.alphas]
+            t = list(range(len(em.alphas)))
+            plt.plot(t[:5000], y[:5000], label='alphas')
+            plt.plot(range(gt_data.shape[0])[:5000], gt_data[:, 0][:5000], linestyle='dashed')
+            plt.title('Alphas y value')
+            plt.legend()
+            plt.subplot(2, 1, 2)
+            y = [beta[0][1] for beta in em.betas]
+            t = list(range(len(em.betas)))
+            plt.plot(t[:5000], y[:5000], label='betas')
+            plt.title('Betas y value')
+            plt.plot(range(gt_data.shape[0])[:5000], gt_data[:, 0][:5000], linestyle='dashed')
+            plt.legend()
+
+            fig = plt.figure(4)
             distances = np.linspace(1000, 4000, 1000)
             plt.plot(distances, em.sensor_mean_model.predict(distances))
             gt_data_pairs = filter(lambda x: x[0] is not None, [[d.height, d.dist] for d in data])

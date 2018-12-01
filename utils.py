@@ -29,7 +29,7 @@ def mul_gaussians_wrong(g1, g2):
 def preprocess_data(filename):
     with open(filename, 'r') as f:
         data = f.read().split('\n')[1:-1]
-        data = [d.split(', ') for d in data]
+        data = [d.split(', ') for d in data[:5000]]
         last_obs_idx = len(data)-1
         for i, d in reversed(list(zip(range(len(data)), data))):
             if d[0] != '-1000':
@@ -52,6 +52,29 @@ def preprocess_data(filename):
                              dt=d[4],
                              dist=d[5]) for d in data]
     return data
+
+def process_gt_data(filename):
+	with open(filename, 'r') as f:
+		data = f.read().split('\n')[1:-1]
+		data = [[float(i) for i in d.split(', ')] for d in data]
+		return np.array([[0., 0., 0.]] + data)
+
+def compute_action_model(gt_data, cmds):
+	gt_deltas_map = dict()
+	for i in range(40):
+		gt_deltas_map[i] = []
+	for i, cmd in enumerate(cmds):
+		delta = rotMat(-gt_data[i,2]).dot(gt_data[i+1]-gt_data[i])
+		_norm_angle = lambda t: math.atan2(math.sin(t), math.cos(t))
+		delta[2] = _norm_angle(delta[2])
+		delta = delta*30.
+		gt_deltas_map[cmd].append(delta)
+
+	gt_action_model = {'mean': np.zeros((40, 3)), 'cov': np.zeros((40, 3, 3))}
+	for i in range(40):
+		gt_action_model['mean'][i] = np.mean(np.array(gt_deltas_map[i]), axis=0)
+		gt_action_model['cov'][i]  = np.cov(np.array(gt_deltas_map[i]), rowvar=False)
+	return gt_action_model
 
 def print_params(u):
     print("=== Mean: {:8.3f}, {:8.3f}, {:8.3f}".format(*u[0]))
