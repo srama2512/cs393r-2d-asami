@@ -18,6 +18,7 @@ FIELD_X = 5400#5400
 
 gt_data = open('state_log.txt', 'r').read().split('\n')[1:-1]
 gt_data = np.array([[float(k) for k in d.split(', ')] for d in gt_data])
+gt_data = np.concatenate((np.array([[0., 0., 0.]]), gt_data), axis=0)
 
 HALF_FIELD_Y = FIELD_Y/2.0
 HALF_FIELD_X = FIELD_X/2.0
@@ -349,8 +350,8 @@ class EM(object):
         regressX = np.array(regressX)
         regressY = np.array(regressY)
         self.sensor_mean_model.fit(regressX[:, 0], regressY[:, 0]) # update the regression coefs.
-        sigma_1_sqr = np.sum((self.sensor_mean_model.predict(regressX[:, 0]) - regressY[:, 0])**2)
-        sigma_2_sqr = np.sum(_norm_angle_vec(regressX[:, 1] - regressY[:, 1])**2)
+        sigma_1_sqr = np.mean((self.sensor_mean_model.predict(regressX[:, 0]) - regressY[:, 0])**2)
+        sigma_2_sqr = np.mean(_norm_angle_vec(regressX[:, 1] - regressY[:, 1])**2)
         self.sensor_varn_model = np.diag([sigma_1_sqr, sigma_2_sqr])
         self.prior_mean_model  = np.copy(self.gammas[0][0])
         self.prior_varn_model  = np.copy(self.gammas[0][1])
