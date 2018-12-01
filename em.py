@@ -33,6 +33,9 @@ BEACONS = [(HALF_FIELD_X, HALF_FIELD_Y),       #  WO_BEACON_BLUE_YELLOW
 def _norm_angle(theta):
     return math.atan2(math.sin(theta), math.cos(theta))
 
+def _norm_angle_vec(theta):
+    return np.arctan2(np.sin(theta), np.cos(theta))
+
 def residual_fn(z, z2):
     dz = z - z2
     dz[1] = math.atan2(math.sin(dz[1]), math.cos(dz[1]))
@@ -240,6 +243,7 @@ class EM(object):
                 mu_alpha, sigma_alpha = self.forward_model.get_params()
                 H = HJacobian_at(mu_alpha)
                 mu_obs_t = H.dot(mu_alpha) + hx(mu_alpha) - H.dot(mu_alpha)
+                mu_obs_t[1] = _norm_angle(mu_obs_t[1])
                 sigma_obs_t = H.dot(sigma_alpha).dot(H.T) + self.sensor_varn_model
                 self.log_likelihood += multivariate_normal.logpdf(obs, mean=mu_obs_t, cov=sigma_obs_t)
 
@@ -280,7 +284,7 @@ class EM(object):
 
         # ==== gamma model prediction ====
         for a, b in zip(self.alphas, self.betas):
-            gamma = deepcopy(a)#mul_gaussians(a, b)
+            gamma = deepcopy(b)#mul_gaussians(a, b)
             gamma[0][2] = _norm_angle(gamma[0][2])
             self.gammas.append(gamma)
 
@@ -288,7 +292,7 @@ class EM(object):
         # data - list of observationTuples
         # Note: height, bearing are after taking command for dt
         # ==== Action model update =====
-        mu_cmds = np.zeros((self.cmd_size, self.n_action))
+        mu_cmds = np.zeros((self.cmd_size, self.n_action + 1)) # averaging cosines and sines
         n_cmds = np.zeros((self.cmd_size, ))
         for i, data_t in enumerate(data): # Note: t = i+1
             ht, bear, bid, cmd, dt, _ = data_t
@@ -317,11 +321,17 @@ class EM(object):
 
             Inv = np.linalg.inv(sigma_cmd + L.dot(sigma_alpha_delta).dot(L.T))
             diff = L.dot(mu_alpha_delta) + m - self.action_mean_model.get(cmd)
-            mu_cmds[cmd, :] = self.action_mean_model.get(cmd) + sigma_cmd.dot(Inv).dot(diff)
+            diff[2] = _norm_angle(diff[2])
+            new_cmd = self.action_mean_model.get(cmd) + sigma_cmd.dot(Inv).dot(diff)
+            mu_cmds[cmd, :2] += new_cmd[:2]
+            mu_cmds[cmd,  2] += np.cos(new_cmd[2])
+            mu_cmds[cmd,  3] += np.sin(new_cmd[2])
             n_cmds[cmd] = n_cmds[cmd] + 1
 
         mu_cmds = mu_cmds / (n_cmds.reshape((-1,1)) + 1e-8)
         mu_cmds[n_cmds == 0] = 0
+
+        mu_cmds = np.concatenate([mu_cmds[:, :2], np.arctan2(mu_cmds[:, 3], mu_cmds[:, 2])[:, np.newaxis]], axis=1)
 
         self.action_mean_model.update(mu_cmds)
 
@@ -340,9 +350,9 @@ class EM(object):
         regressX = np.array(regressX)
         regressY = np.array(regressY)
         self.sensor_mean_model.fit(regressX[:, 0], regressY[:, 0]) # update the regression coefs.
-        sigma_1 = np.std(self.sensor_mean_model.predict(regressX[:, 0]) - regressY[:, 0])
-        sigma_2 = np.std(regressX[:, 1] - regressY[:, 1])
-        self.sensor_varn_model = np.diag([sigma_1**2, sigma_2**2])
+        sigma_1_sqr = np.sum((self.sensor_mean_model.predict(regressX[:, 0]) - regressY[:, 0])**2)
+        sigma_2_sqr = np.sum(_norm_angle_vec(regressX[:, 1] - regressY[:, 1])**2)
+        self.sensor_varn_model = np.diag([sigma_1_sqr, sigma_2_sqr])
         self.prior_mean_model  = np.copy(self.gammas[0][0])
         self.prior_varn_model  = np.copy(self.gammas[0][1])
 
