@@ -50,13 +50,13 @@ class EKFforward(ExtendedKalmanFilter):
             self.action_cov = action_cov
 
     def predict_x(self, u=0):
-        j13 = -np.sin(self.x[2])*u[0] - np.cos(self.x[2])*u[1]
-        j23 =  np.cos(self.x[2])*u[0] - np.sin(self.x[2])*u[1]
+        j13 = -np.sin(self.x[2])*u[0] + np.cos(self.x[2])*u[1]
+        j23 = -np.cos(self.x[2])*u[0] - np.sin(self.x[2])*u[1]
 
         self.F = np.array([[1., 0., j13],
                            [0., 1., j23],
                            [0., 0., 1. ]])
-        R = rotMat(self.x[2])
+        R = rotMat(-self.x[2])
         self.Q = R.dot(self.action_cov).dot(R.T)
         self.x = self.x + R.dot(u)
         self.x[2] = _norm_angle(self.x[2])
@@ -74,13 +74,13 @@ class EKFbackward(ExtendedKalmanFilter):
 
     def predict_x(self, u=0):
         th = self.x[2] - u[2]
-        j13 = -np.sin(th)*u[0] - np.cos(th)*u[1]
-        j23 =  np.cos(th)*u[0] - np.sin(th)*u[1]
+        j13 =  np.sin(th)*u[0] - np.cos(th)*u[1]
+        j23 =  np.cos(th)*u[0] + np.sin(th)*u[1]
 
-        self.F = np.array([[1., 0., -j13],
-                           [0., 1., -j23],
-                           [0., 0.,  1. ]])
-        R = rotMat(self.x[2] - u[2])
+        self.F = np.array([[1., 0., j13],
+                           [0., 1., j23],
+                           [0., 0.,  1.]])
+        R = rotMat(-th)
         self.Q = R.dot(self.action_cov).dot(R.T)
         self.x = self.x - R.dot(u)
         self.x[2] = _norm_angle(self.x[2])
@@ -243,7 +243,6 @@ class EM(object):
                 mu_alpha, sigma_alpha = self.forward_model.get_params()
                 H = HJacobian_at(mu_alpha)
                 mu_obs_t = H.dot(mu_alpha) + hx(mu_alpha) - H.dot(mu_alpha)
-                mu_obs_t[1] = _norm_angle(mu_obs_t[1])
                 sigma_obs_t = H.dot(sigma_alpha).dot(H.T) + self.sensor_varn_model
                 self.log_likelihood += multivariate_normal.logpdf(obs, mean=mu_obs_t, cov=sigma_obs_t)
 
@@ -284,7 +283,7 @@ class EM(object):
 
         # ==== gamma model prediction ====
         for a, b in zip(self.alphas, self.betas):
-            gamma = deepcopy(b)#mul_gaussians(a, b)
+            gamma = deepcopy(a)#mul_gaussians(a, b)
             gamma[0][2] = _norm_angle(gamma[0][2])
             self.gammas.append(gamma)
 
@@ -310,7 +309,7 @@ class EM(object):
             P = np.array([[ -1,  0,  0, 1, 0, 0],
                           [  0, -1,  0, 0, 1, 0],
                           [  0,  0, -1, 0, 0, 1]])
-            D = lambda s: rotMat(-s[2]).dot(np.dot(P, s))
+            D = lambda s: rotMat(s[2]).dot(np.dot(P, s))
             L = np.zeros((self.n_action, self.n_state*2))
             L[:, 0:self.n_state] = -rotMat(mu_alpha_delta[2])
             L[:, self.n_state:2*self.n_state] = rotMat(mu_alpha_delta[2])
