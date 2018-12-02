@@ -291,8 +291,8 @@ class EM(object):
 
         # ==== gamma model prediction ====
         for a, b in zip(self.alphas, self.betas):
-            gamma = deepcopy(b) # mul_gaussians(a, b)
-            # gamma[0][2] = _norm_angle(gamma[0][2])
+            gamma = mul_gaussians(a, b)
+            gamma[0][2] = _norm_angle(gamma[0][2])
             self.gammas.append(gamma)
 
     def Mstep(self, data):
@@ -374,6 +374,7 @@ if __name__ == '__main__':
     parser.add_argument('--data', type=str, default='2d_asami_data.txt')
     parser.add_argument('--n_iter', type=int, default=10)
     parser.add_argument('--seed', type=int, default=123)
+    parser.add_argument('--n_plot', type=int, default=10)
     args = parser.parse_args()
 
     np.random.seed(args.seed)
@@ -397,7 +398,7 @@ if __name__ == '__main__':
         #plt.title('Backward pass estimates')
         #plt.show()
 
-        if (it+1) % 10 == 1:
+        if (it+1) % args.n_plot == 1:
             # fig = plt.figure(0)
             # ax = fig.add_subplot(121, projection='3d')
             # x = [alpha[0][0] for alpha in em.alphas]
@@ -423,7 +424,7 @@ if __name__ == '__main__':
             # plt.subplot(2, 1, 1)
             x = [alpha[0][0] for alpha in em.alphas]
             t = list(range(len(em.alphas)))
-            # plt.plot(t, x, label='alphas')
+            plt.plot(t, x, label='alphas')
             plt.plot(range(gt_data.shape[0]), gt_data[:, 0], linestyle='dashed')
             plt.title('Alphas x value')
             # plt.legend()
@@ -439,7 +440,7 @@ if __name__ == '__main__':
             # plt.subplot(2, 1, 1)
             y = [alpha[0][1] for alpha in em.alphas]
             t = list(range(len(em.alphas)))
-            # plt.plot(t, y, label='alphas')
+            plt.plot(t, y, label='alphas')
             plt.plot(range(gt_data.shape[0]), gt_data[:, 1], linestyle='dashed')
             plt.title('Alphas y value')
             # plt.legend()
@@ -453,14 +454,14 @@ if __name__ == '__main__':
 
             fig = plt.figure(3)
             # plt.subplot(1, 1, 1)
-            theta = [alpha[0][2] for alpha in em.alphas]
+            theta = np.unwrap(np.array([alpha[0][2] for alpha in em.alphas]))
             t = list(range(len(em.alphas)))
-            # plt.plot(t, theta, label='alphas')
-            plt.plot(range(gt_data.shape[0]), gt_data[:, 2], linestyle='dashed')
+            plt.plot(t, theta, label='alphas')
+            plt.plot(range(gt_data.shape[0]), np.unwrap(gt_data[:, 2]), linestyle='dashed')
             plt.title('Alphas theta value')
             # plt.legend()
             # plt.subplot(2, 1, 2)
-            theta = [beta[0][2] for beta in em.betas]
+            theta = np.unwrap(np.array([beta[0][2] for beta in em.betas]))
             t = list(range(len(em.betas)))
             plt.plot(t, theta, label='betas')
             plt.title('Betas theta value')
