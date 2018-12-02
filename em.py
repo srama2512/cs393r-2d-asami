@@ -86,6 +86,7 @@ class EKFbackward(ExtendedKalmanFilter):
         R = rotMat(th)
         self.Q = R.dot(self.action_cov).dot(R.T)
         self.x = self.x - R.dot(u)
+        # print('##### predict {}, x : {}'.format(-R.dot(u), self.x))
         self.x[2] = _norm_angle(self.x[2])
 
     def get_params(self):
@@ -170,8 +171,8 @@ class EM(object):
     def _create_models(self):
         self.sensor_mean_model = PolynomialRegression(d=3)
         self.action_mean_model = ActionMapper(cmd_size=self.cmd_size, n_action=self.n_action)
-        self.sensor_varn_model = np.diag([100., 0.2])
-        self.action_varn_model = np.diag([400., 400., 0.1])
+        self.sensor_varn_model = np.diag([4., 0.04])
+        self.action_varn_model = np.diag([100., 100., 0.01])
         self.prior_mean_model  = np.zeros((self.n_state,))
         self.prior_varn_model  = np.diag([10000., 10000., 1])
 
@@ -232,6 +233,7 @@ class EM(object):
             ht, bear, bid, cmd, dt, _ = data_t
             act = self.action_mean_model.get(cmd) * dt
             self.forward_model.predict(u=act)
+            # print('gt : {}'.format(gt_data[i+1]))
 
             HJacobian_at = None
             hx = None
@@ -242,8 +244,6 @@ class EM(object):
             else:
                 obs = None
 
-            self.forward_model.update(obs, HJacobian_at, hx, residual=residual_fn)
-
             if ht is not None:
                 # log likelihood computation
                 mu_alpha, sigma_alpha = self.forward_model.get_params()
@@ -251,6 +251,8 @@ class EM(object):
                 mu_obs_t = H.dot(mu_alpha) + hx(mu_alpha) - H.dot(mu_alpha)
                 sigma_obs_t = H.dot(sigma_alpha).dot(H.T) + self.sensor_varn_model
                 self.log_likelihood += multivariate_normal.logpdf(obs, mean=mu_obs_t, cov=sigma_obs_t)
+            self.forward_model.update(obs, HJacobian_at, hx, residual=residual_fn)
+
 
             forward_params = self.forward_model.get_params()
             self.alphas.append(forward_params)
@@ -289,15 +291,15 @@ class EM(object):
 
         # ==== gamma model prediction ====
         for a, b in zip(self.alphas, self.betas):
-            gamma = deepcopy(a)#mul_gaussians(a, b)
-            gamma[0][2] = _norm_angle(gamma[0][2])
+            gamma = deepcopy(b) # mul_gaussians(a, b)
+            # gamma[0][2] = _norm_angle(gamma[0][2])
             self.gammas.append(gamma)
 
     def Mstep(self, data):
         # data - list of observationTuples
         # Note: height, bearing are after taking command for dt
         # ==== Action model update =====
-        mu_cmds = np.zeros((self.cmd_size, self.n_action + 1)) # averaging cosines and sines
+        mu_cmds = np.zeros((self.cmd_size, self.n_action)) # averaging cosines and sines
         n_cmds = np.zeros((self.cmd_size, ))
         for i, data_t in enumerate(data): # Note: t = i+1
             ht, bear, bid, cmd, dt, _ = data_t
@@ -315,31 +317,30 @@ class EM(object):
             P = np.array([[ -1,  0,  0, 1, 0, 0],
                           [  0, -1,  0, 0, 1, 0],
                           [  0,  0, -1, 0, 0, 1]])
-            D = lambda s: rotMat(s[2]).dot(np.dot(P, s))
+            D = lambda s: rotMat(-s[2]).dot(np.dot(P, s))
             L = np.zeros((self.n_action, self.n_state*2))
-            L[:, 0:self.n_state] = -rotMat(mu_alpha_delta[2])
-            L[:, self.n_state:2*self.n_state] = rotMat(mu_alpha_delta[2])
-            tmp = (lambda t: np.array([[-np.sin(t), -np.cos(t)],
-                                       [ np.cos(t), -np.sin(t)]]))(mu_alpha_delta[2])
+            L[:, 0:self.n_state] = -rotMat(-mu_alpha_delta[2])
+            L[:, self.n_state:2*self.n_state] = rotMat(-mu_alpha_delta[2])
+            tmp = (lambda t: np.array([[-np.sin(t),  np.cos(t)],
+                                       [-np.cos(t), -np.sin(t)]]))(mu_alpha_delta[2])
             L[0:2, 2] = tmp.dot(np.dot(P, mu_alpha_delta)[0:2])
             m = D(mu_alpha_delta) - L.dot(mu_alpha_delta)
 
             Inv = np.linalg.inv(sigma_cmd + L.dot(sigma_alpha_delta).dot(L.T))
             diff = L.dot(mu_alpha_delta) + m - self.action_mean_model.get(cmd)
             diff[2] = _norm_angle(diff[2])
-            new_cmd = self.action_mean_model.get(cmd) + sigma_cmd.dot(Inv).dot(diff)
-            mu_cmds[cmd, :2] += new_cmd[:2]
-            mu_cmds[cmd,  2] += np.cos(new_cmd[2])
-            mu_cmds[cmd,  3] += np.sin(new_cmd[2])
+            new_cmd = sigma_cmd.dot(Inv).dot(diff)
+            mu_cmds[cmd, :] += new_cmd
             n_cmds[cmd] = n_cmds[cmd] + 1
 
         mu_cmds = mu_cmds / (n_cmds.reshape((-1,1)) + 1e-8)
         mu_cmds[n_cmds == 0] = 0
 
-        mu_cmds = np.concatenate([mu_cmds[:, :2], np.arctan2(mu_cmds[:, 3], mu_cmds[:, 2])[:, np.newaxis]], axis=1)
         with np.printoptions(formatter={'float': '{: 10.3f}'.format}):
             print('mu_cmds update : \n{}'.format(np.column_stack([self.action_mean_model.cmd_mus, mu_cmds])))
         mu_cmds += self.action_mean_model.cmd_mus
+
+        # mu_cmds = np.concatenate([mu_cmds[:, :2], np.arctan2(mu_cmds[:, 3], mu_cmds[:, 2])[:, np.newaxis]], axis=1)
 
         self.action_mean_model.update(mu_cmds)
 
@@ -380,6 +381,10 @@ if __name__ == '__main__':
     em = EM()
     data = preprocess_data(args.data)
 
+    gt_data_pairs = filter(lambda x: x[0] is not None, [[d.height, d.dist] for d in data])
+    gt_data_pairs = np.array(list(gt_data_pairs))
+    em.sensor_mean_model.fit(gt_data_pairs[:, 1], gt_data_pairs[:, 0])
+
     for it in range(0, args.n_iter):
         print('=====> Iteration {:d}'.format(it))
         em.Estep(data)
@@ -415,51 +420,51 @@ if __name__ == '__main__':
             # plt.legend()
 
             fig = plt.figure(1)
-            plt.subplot(2, 1, 1)
-            theta = [alpha[0][2] for alpha in em.alphas]
+            # plt.subplot(2, 1, 1)
+            x = [alpha[0][0] for alpha in em.alphas]
             t = list(range(len(em.alphas)))
-            plt.plot(t[:5000], theta[:5000], label='alphas')
-            plt.plot(range(gt_data.shape[0])[:5000], gt_data[:, 2][:5000], linestyle='dashed')
-            plt.title('Alphas theta value')
-            plt.legend()
-            plt.subplot(2, 1, 2)
-            theta = [beta[0][2] for beta in em.betas]
+            # plt.plot(t, x, label='alphas')
+            plt.plot(range(gt_data.shape[0]), gt_data[:, 0], linestyle='dashed')
+            plt.title('Alphas x value')
+            # plt.legend()
+            # plt.subplot(2, 1, 2)
+            x = [beta[0][0] for beta in em.betas]
             t = list(range(len(em.betas)))
-            plt.plot(t[:5000], theta[:5000], label='betas')
-            plt.title('Betas theta value')
-            plt.plot(range(gt_data.shape[0])[:5000], gt_data[:, 2][:5000], linestyle='dashed')
+            plt.plot(t, x, label='betas')
+            plt.title('Betas x value')
+            # plt.plot(range(gt_data.shape[0]), gt_data[:, 0], linestyle='dashed')
             plt.legend()
 
             fig = plt.figure(2)
-            plt.subplot(2, 1, 1)
-            x = [alpha[0][0] for alpha in em.alphas]
+            # plt.subplot(2, 1, 1)
+            y = [alpha[0][1] for alpha in em.alphas]
             t = list(range(len(em.alphas)))
-            plt.plot(t[:5000], x[:5000], label='alphas')
-            plt.plot(range(gt_data.shape[0])[:5000], gt_data[:, 0][:5000], linestyle='dashed')
-            plt.title('Alphas x value')
-            plt.legend()
-            plt.subplot(2, 1, 2)
-            x = [beta[0][0] for beta in em.betas]
+            # plt.plot(t, y, label='alphas')
+            plt.plot(range(gt_data.shape[0]), gt_data[:, 1], linestyle='dashed')
+            plt.title('Alphas y value')
+            # plt.legend()
+            # plt.subplot(2, 1, 2)
+            y = [beta[0][1] for beta in em.betas]
             t = list(range(len(em.betas)))
-            plt.plot(t[:5000], x[:5000], label='betas')
-            plt.title('Betas x value')
-            plt.plot(range(gt_data.shape[0])[:5000], gt_data[:, 0][:5000], linestyle='dashed')
+            plt.plot(t, y, label='betas')
+            plt.title('Betas y value')
+            # plt.plot(range(gt_data.shape[0]), gt_data[:, 1], linestyle='dashed')
             plt.legend()
 
             fig = plt.figure(3)
-            plt.subplot(2, 1, 1)
-            y = [alpha[0][1] for alpha in em.alphas]
+            # plt.subplot(1, 1, 1)
+            theta = [alpha[0][2] for alpha in em.alphas]
             t = list(range(len(em.alphas)))
-            plt.plot(t[:5000], y[:5000], label='alphas')
-            plt.plot(range(gt_data.shape[0])[:5000], gt_data[:, 0][:5000], linestyle='dashed')
-            plt.title('Alphas y value')
-            plt.legend()
-            plt.subplot(2, 1, 2)
-            y = [beta[0][1] for beta in em.betas]
+            # plt.plot(t, theta, label='alphas')
+            plt.plot(range(gt_data.shape[0]), gt_data[:, 2], linestyle='dashed')
+            plt.title('Alphas theta value')
+            # plt.legend()
+            # plt.subplot(2, 1, 2)
+            theta = [beta[0][2] for beta in em.betas]
             t = list(range(len(em.betas)))
-            plt.plot(t[:5000], y[:5000], label='betas')
-            plt.title('Betas y value')
-            plt.plot(range(gt_data.shape[0])[:5000], gt_data[:, 0][:5000], linestyle='dashed')
+            plt.plot(t, theta, label='betas')
+            plt.title('Betas theta value')
+            # plt.plot(range(gt_data.shape[0]), gt_data[:, 2], linestyle='dashed')
             plt.legend()
 
             fig = plt.figure(4)
