@@ -144,7 +144,7 @@ class ActionMapper(object):
         gt_data = process_gt_data('state_log.txt')
         cmds = [d.command for d in sensor_data]
         gt_action_model = compute_action_model(gt_data, cmds)
-        self.cmd_mus = gt_action_model['mean']
+        #self.cmd_mus = gt_action_model['mean']
 
     def getGTVelocities(self, x, y, theta):
         return x*240.0, y*120.0, theta*math.radians(130.0)
@@ -189,7 +189,9 @@ class EM(object):
         self.forward_model.Q = np.copy(self.action_varn_model)
         self.forward_model.R = np.copy(self.sensor_varn_model)
         self.backward_model.x = np.array([0., 0., 0.])
+        #self.backward_model.x = np.array([-294.87, -896.29, 0.4])
         self.backward_model.P = np.diag([100000., 100000., 2*np.pi]) # belief covariance
+        #self.backward_model.P = np.diag([100., 100., 0.2]) # belief covariance
         self.backward_model.Q = np.copy(self.action_varn_model)
         self.backward_model.R = np.copy(self.sensor_varn_model)
 
@@ -402,7 +404,7 @@ if __name__ == '__main__':
 
     gt_data_pairs = filter(lambda x: x[0] is not None, [[d.height, d.dist] for d in data])
     gt_data_pairs = np.array(list(gt_data_pairs))
-    em.sensor_mean_model.fit(gt_data_pairs[:, 1], gt_data_pairs[:, 0])
+    #em.sensor_mean_model.fit(gt_data_pairs[:, 1], gt_data_pairs[:, 0])
 
     try:
         os.mkdir(args.save_path)
