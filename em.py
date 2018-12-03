@@ -127,23 +127,23 @@ class ActionMapper(object):
         self.cmd_size = 40
         self.n_action = n_action
         self.cmd_mus = np.zeros((cmd_size, n_action))
-        self.b_angles = [0, math.pi, math.pi/4, -math.pi/4, math.pi/2, -math.pi/2, 3*math.pi/4, -3*math.pi/4]
-        self.a_vels = [-1./2., -1./6., 0., 1./6., 1./2.]
-        self.gt_mus = np.zeros((cmd_size, n_action))
-        count = 0
-        for a in self.a_vels:
-            for b in self.b_angles:
-                magn = math.sqrt(1-a**2)
-                vx = magn*math.cos(b)
-                vy = magn*math.sin(b)
-                self.gt_mus[count] = np.array(list(self.getGTVelocities(vx, vy, a)))
-                count += 1
+        #self.b_angles = [0, math.pi, math.pi/4, -math.pi/4, math.pi/2, -math.pi/2, 3*math.pi/4, -3*math.pi/4]
+        #self.a_vels = [-1./2., -1./6., 0., 1./6., 1./2.]
+        #self.gt_mus = np.zeros((cmd_size, n_action))
+        #count = 0
+        #for a in self.a_vels:
+        #    for b in self.b_angles:
+        #        magn = math.sqrt(1-a**2)
+        #        vx = magn*math.cos(b)
+        #        vy = magn*math.sin(b)
+        #        self.gt_mus[count] = np.array(list(self.getGTVelocities(vx, vy, a)))
+        #        count += 1
 
         # self.cmd_mus = self.gt_mus.copy()
-        sensor_data = preprocess_data('2d_asami_data.txt')
-        gt_data = process_gt_data('state_log.txt')
-        cmds = [d.command for d in sensor_data]
-        gt_action_model = compute_action_model(gt_data, cmds)
+        #sensor_data = preprocess_data('2d_asami_data.txt')
+        #gt_data = process_gt_data('state_log.txt')
+        #cmds = [d.command for d in sensor_data]
+        #gt_action_model = compute_action_model(gt_data, cmds)
         #self.cmd_mus = gt_action_model['mean']
 
     def getGTVelocities(self, x, y, theta):
@@ -306,7 +306,7 @@ class EM(object):
 
         # ==== gamma model prediction ====
         for a, b in zip(self.alphas, self.betas):
-            gamma = deepcopy(a)#mul_gaussians(a, b)
+            gamma = mul_gaussians(a, b)
             gamma[0][2] = _norm_angle(gamma[0][2])
             self.gammas.append(gamma)
 

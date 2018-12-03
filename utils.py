@@ -15,7 +15,7 @@ def mul_gaussians(g1, g2):
     v2inv = linv(g2[1])
 
     var_out = linv(v1inv + v2inv)
-    mu_out  = linv(var_out).dot(v1inv.dot(g1[0]) + v2inv.dot(g2[0]))
+    mu_out  = var_out.dot(v1inv.dot(g1[0]) + v2inv.dot(g2[0]))
     return (mu_out, var_out)
 
 def mul_gaussians_wrong(g1, g2):
