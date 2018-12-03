@@ -243,7 +243,7 @@ class EM(object):
             act = self.action_mean_model.get(cmd) * dt
             self.forward_model.predict(u=act)
             # print('gt : {}'.format(gt_data[i+1]))
-            prev_obs_seen += dt
+            prev_obs_seen += 1.0
 
             HJacobian_at = None
             hx = None
