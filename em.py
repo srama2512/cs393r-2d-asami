@@ -180,20 +180,25 @@ class EM(object):
         self.prior_varn_model  = np.diag([10000., 10000., 1])
 
     def _initialize_em(self):
-        self.alphas = []
-        self.betas = []
-        self.gammas = []
-        self.deltas = [] # b * beta
         self.forward_model.x = np.copy(self.prior_mean_model)
         self.forward_model.P = np.copy(self.prior_varn_model) # belief covariance
         self.forward_model.Q = np.copy(self.action_varn_model)
         self.forward_model.R = np.copy(self.sensor_varn_model)
-        self.backward_model.x = np.array([0., 0., 0.])
-        #self.backward_model.x = np.array([-294.87, -896.29, 0.4])
-        self.backward_model.P = np.diag([100000., 100000., 2*np.pi]) # belief covariance
-        #self.backward_model.P = np.diag([100., 100., 0.2]) # belief covariance
+        if hasattr(self, 'gammas'):
+            self.backward_model.x = self.gammas[-1][0].copy()
+            self.backward_model.P = self.gammas[-1][1].copy()
+        else:
+            self.backward_model.x = np.array([0., 0., 0.])
+            self.backward_model.P = np.diag([100000., 100000., 2*np.pi]) # belief covariance
+            #self.backward_model.x = np.array([-294.87, -896.29, 0.4])
+            #self.backward_model.P = np.diag([100., 100., 0.2]) # belief covariance
         self.backward_model.Q = np.copy(self.action_varn_model)
         self.backward_model.R = np.copy(self.sensor_varn_model)
+
+        self.alphas = []
+        self.betas = []
+        self.gammas = []
+        self.deltas = [] # b * beta
 
         self.alphas.append((self.prior_mean_model.copy(), self.prior_varn_model.copy()))
         self.betas.append((self.backward_model.x, self.backward_model.P))
