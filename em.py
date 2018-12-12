@@ -14,6 +14,7 @@ import os
 import pdb
 import math
 import argparse
+import torch
 
 FIELD_Y = 3600#3600
 FIELD_X = 5400#5400
@@ -527,3 +528,10 @@ if __name__ == '__main__':
             fig4.clf()
 
         em.Mstep(data)
+
+        models = dict()
+        models['sensorParams'] = {'coef_': em.sensor_mean_model.regressor.coef_,
+                                    'intercept_': em.sensor_mean_model.regressor.intercept_,
+                                    'sensor_varn_model': em.sensor_varn_model}
+        models['cmd_mus'] = em.action_mean_model.cmd_mus
+        torch.save(models, os.path.join(args.save_path, 'models_dict_%.5d'%(it)))
