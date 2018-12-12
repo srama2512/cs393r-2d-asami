@@ -6,7 +6,7 @@ from sklearn.linear_model import LinearRegression
 from scipy.stats import multivariate_normal, circvar
 from mpl_toolkits.mplot3d import Axes3D
 from copy import deepcopy
-from process_gt import compute_action_model, process_gt_data
+from utils import compute_action_model, process_gt_data
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -31,7 +31,6 @@ BEACONS = [(HALF_FIELD_X, HALF_FIELD_Y),       #  WO_BEACON_BLUE_YELLOW
            (0, -HALF_FIELD_Y),                 #  WO_BEACON_PINK_BLUE
            (-HALF_FIELD_X, HALF_FIELD_Y),      #  WO_BEACON_PINK_YELLOW
            (-HALF_FIELD_X, -HALF_FIELD_Y)]     #  WO_BEACON_YELLOW_PINK,
-
 
 def _norm_angle(theta):
     return math.atan2(math.sin(theta), math.cos(theta))
@@ -127,17 +126,17 @@ class ActionMapper(object):
         self.cmd_size = 40
         self.n_action = n_action
         self.cmd_mus = np.zeros((cmd_size, n_action))
-        #self.b_angles = [0, math.pi, math.pi/4, -math.pi/4, math.pi/2, -math.pi/2, 3*math.pi/4, -3*math.pi/4]
-        #self.a_vels = [-1./2., -1./6., 0., 1./6., 1./2.]
-        #self.gt_mus = np.zeros((cmd_size, n_action))
-        #count = 0
-        #for a in self.a_vels:
-        #    for b in self.b_angles:
-        #        magn = math.sqrt(1-a**2)
-        #        vx = magn*math.cos(b)
-        #        vy = magn*math.sin(b)
-        #        self.gt_mus[count] = np.array(list(self.getGTVelocities(vx, vy, a)))
-        #        count += 1
+        self.b_angles = [0, math.pi, math.pi/4, -math.pi/4, math.pi/2, -math.pi/2, 3*math.pi/4, -3*math.pi/4]
+        self.a_vels = [-1./2., -1./6., 0., 1./6., 1./2.]
+        self.gt_mus = np.zeros((cmd_size, n_action))
+        count = 0
+        for a in self.a_vels:
+            for b in self.b_angles:
+                magn = math.sqrt(1-a**2)
+                vx = magn*math.cos(b)
+                vy = magn*math.sin(b)
+                self.gt_mus[count] = np.array(list(self.getGTVelocities(vx, vy, a)))
+                count += 1
 
         # self.cmd_mus = self.gt_mus.copy()
         #sensor_data = preprocess_data('2d_asami_data.txt')
