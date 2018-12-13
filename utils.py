@@ -42,6 +42,13 @@ def preprocess_data(filename):
         d[3] = int(d[3])
         d[4] = float(d[4])
         d[5] = float(d[5]) if d[5] != '-1000' else None
+
+        if d[0] is not None and d[0] > 70.0:
+            d[0] = None
+            d[1] = None
+            d[2] = None
+            d[5] = None
+
         return d
 
     data = [sanitize_data_point(d) for d in data[:last_obs_idx+1]]

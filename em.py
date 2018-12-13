@@ -6,7 +6,7 @@ from sklearn.linear_model import LinearRegression
 from scipy.stats import multivariate_normal, circvar
 from mpl_toolkits.mplot3d import Axes3D
 from copy import deepcopy
-from process_gt import compute_action_model, process_gt_data
+from utils import compute_action_model, process_gt_data
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -14,6 +14,7 @@ import os
 import pdb
 import math
 import argparse
+import torch
 
 FIELD_Y = 3600#3600
 FIELD_X = 5400#5400
@@ -31,7 +32,6 @@ BEACONS = [(HALF_FIELD_X, HALF_FIELD_Y),       #  WO_BEACON_BLUE_YELLOW
            (0, -HALF_FIELD_Y),                 #  WO_BEACON_PINK_BLUE
            (-HALF_FIELD_X, HALF_FIELD_Y),      #  WO_BEACON_PINK_YELLOW
            (-HALF_FIELD_X, -HALF_FIELD_Y)]     #  WO_BEACON_YELLOW_PINK,
-
 
 def _norm_angle(theta):
     return math.atan2(math.sin(theta), math.cos(theta))
@@ -127,17 +127,17 @@ class ActionMapper(object):
         self.cmd_size = 40
         self.n_action = n_action
         self.cmd_mus = np.zeros((cmd_size, n_action))
-        #self.b_angles = [0, math.pi, math.pi/4, -math.pi/4, math.pi/2, -math.pi/2, 3*math.pi/4, -3*math.pi/4]
-        #self.a_vels = [-1./2., -1./6., 0., 1./6., 1./2.]
-        #self.gt_mus = np.zeros((cmd_size, n_action))
-        #count = 0
-        #for a in self.a_vels:
-        #    for b in self.b_angles:
-        #        magn = math.sqrt(1-a**2)
-        #        vx = magn*math.cos(b)
-        #        vy = magn*math.sin(b)
-        #        self.gt_mus[count] = np.array(list(self.getGTVelocities(vx, vy, a)))
-        #        count += 1
+        self.b_angles = [0, math.pi, math.pi/4, -math.pi/4, math.pi/2, -math.pi/2, 3*math.pi/4, -3*math.pi/4]
+        self.a_vels = [-1./2., -1./6., 0., 1./6., 1./2.]
+        self.gt_mus = np.zeros((cmd_size, n_action))
+        count = 0
+        for a in self.a_vels:
+            for b in self.b_angles:
+                magn = math.sqrt(1-a**2)
+                vx = magn*math.cos(b)
+                vy = magn*math.sin(b)
+                self.gt_mus[count] = np.array(list(self.getGTVelocities(vx, vy, a)))
+                count += 1
 
         # self.cmd_mus = self.gt_mus.copy()
         #sensor_data = preprocess_data('2d_asami_data.txt')
@@ -180,20 +180,25 @@ class EM(object):
         self.prior_varn_model  = np.diag([10000., 10000., 1])
 
     def _initialize_em(self):
-        self.alphas = []
-        self.betas = []
-        self.gammas = []
-        self.deltas = [] # b * beta
         self.forward_model.x = np.copy(self.prior_mean_model)
         self.forward_model.P = np.copy(self.prior_varn_model) # belief covariance
         self.forward_model.Q = np.copy(self.action_varn_model)
         self.forward_model.R = np.copy(self.sensor_varn_model)
-        self.backward_model.x = np.array([0., 0., 0.])
-        #self.backward_model.x = np.array([-294.87, -896.29, 0.4])
-        self.backward_model.P = np.diag([100000., 100000., 2*np.pi]) # belief covariance
-        #self.backward_model.P = np.diag([100., 100., 0.2]) # belief covariance
+        if hasattr(self, 'gammas'):
+            self.backward_model.x = self.gammas[-1][0].copy()
+            self.backward_model.P = self.gammas[-1][1].copy()
+        else:
+            self.backward_model.x = np.array([0., 0., 0.])
+            self.backward_model.P = np.diag([100000., 100000., 2*np.pi]) # belief covariance
+            #self.backward_model.x = np.array([-294.87, -896.29, 0.4])
+            #self.backward_model.P = np.diag([100., 100., 0.2]) # belief covariance
         self.backward_model.Q = np.copy(self.action_varn_model)
         self.backward_model.R = np.copy(self.sensor_varn_model)
+
+        self.alphas = []
+        self.betas = []
+        self.gammas = []
+        self.deltas = [] # b * beta
 
         self.alphas.append((self.prior_mean_model.copy(), self.prior_varn_model.copy()))
         self.betas.append((self.backward_model.x, self.backward_model.P))
@@ -523,3 +528,10 @@ if __name__ == '__main__':
             fig4.clf()
 
         em.Mstep(data)
+
+        models = dict()
+        models['sensorParams'] = {'coef_': em.sensor_mean_model.regressor.coef_,
+                                    'intercept_': em.sensor_mean_model.regressor.intercept_,
+                                    'sensor_varn_model': em.sensor_varn_model}
+        models['cmd_mus'] = em.action_mean_model.cmd_mus
+        torch.save(models, os.path.join(args.save_path, 'models_dict_%.5d'%(it)))
